@@ -32,6 +32,8 @@ As obvious it is, the pinout has changed between the Arduino version and the ESP
 |Green Led|6|GPIO17|
 |Blue Led|5|GPIO18|
 |Solenoid|10|GPIO19|
+|I²C SDA|2|GPIO21|
+|I²C SCL|3|GPIO22|
 
 ### Hardware
 
