@@ -1,13 +1,7 @@
 #ifndef ABSMOUSE_h
 #define ABSMOUSE_h
 
-#include "HID.h"
-
-#if !defined(_USING_HID)
-
-#warning "AbsMouse not compatible with this device and/or firmware"
-
-#else
+#include "NimBLEHIDDevice.h"
 
 #define MOUSE_LEFT 0x01
 #define MOUSE_RIGHT 0x02
@@ -22,6 +16,11 @@ private:
 	uint32_t _width;
 	uint32_t _height;
 	bool _autoReport;
+	NimBLEService* m_deviceInfoService; //0x180a
+	NimBLEService* m_hidService; //0x1812
+	NimBLECharacteristic *inputMouse;
+
+	static void taskServer(void *pvParameter);
 
 public:
 	AbsMouse_(void);
@@ -32,6 +31,4 @@ public:
 	void release(uint8_t b = MOUSE_LEFT);
 };
 extern AbsMouse_ AbsMouse;
-
-#endif
 #endif

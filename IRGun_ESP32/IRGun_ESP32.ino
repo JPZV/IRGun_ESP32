@@ -6,19 +6,23 @@
    @n INO file for Samco Light Gun 4 LED setup
    @copyright   Samco, https://github.com/samuelballantyne, June 2020
    @copyright   GNU Lesser General Public License
+   @copyright   Makoto, https://github.com/makotoworkshop, March 2023
+   @copyright   GNU Lesser General Public License
    @author [Sam Ballantyne](samuelballantyne@hotmail.com)
+   @author [Makoto](makotoworkshop.org)
    @version  V1.0
-   @date  2020
+   @date  2023
    GNU General Public License v3.0
    https://github.com/samuelballantyne/IR-Light-Gun/blob/master/LICENSE
+   https://github.com/makotoworkshop/IRGun_Arduino/blob/master/LICENSE
   ———————————————————————————————————————————————————————————————————————
    ######################
-   # MODIFIED By Makoto : makotoworkshop.org
+   # MODIFIED By JPZV : https://github.com/JPZV
    ######################
-   LightGunIR_4IR_Makoto_V2.3.ino - 12/2022
+   IRGun_ESP32.ino - 11/2023
    Hack for Pistolet X-SHOT LASER360 ("laser" game toy)
    Work with 4 LEDs IR sources setup (2 up and 2 down to the screen)
-   Upload to an Arduino Pro Micro (32u4 - Leonardo)
+   Upload to an ESP32
    
    Ok - Remplacement du clavier HID par un Joystick HID (Stick XY et boutons (Start, Reload, Gachette))
    Ok - Mode Reload automatique si la souris sort de l'écran.
@@ -61,14 +65,16 @@
    Step 8: Offset are now saved to EEPROM
 */
 
-
-#include <HID.h>
 #include <Wire.h>
-#include <Joystick.h>   // Librairie Joystick by Matthew Heironimus V2.0.7
-#include <AbsMouse.h>
-#include <DFRobotIRPosition.h>
-#include <SamcoBeta.h>
+#include <BleGamepad.h>
+#include "AbsMouse.h"
+#include "DFRobotIRPosition.h"
+#include "SamcoBeta.h"
 #include <EEPROM.h>
+
+#ifndef ARDUINO_ARCH_ESP32
+#error "This project must run on an ESP32."
+#endif
 
 
 int xCenter = 512;    // Open serial monitor and update these values to save calibration manualy
@@ -80,12 +86,8 @@ float yOffset = 82;
 //**************************
 //* Définition du Joystick *
 //**************************
-Joystick_ Joystick(JOYSTICK_DEFAULT_REPORT_ID, JOYSTICK_TYPE_JOYSTICK,
-                   3, 0,                  // Button Count, Hat Switch Count
-                   true, true, false,     // X and Y, but no Z Axis
-                   false, false, false,   // No Rx, Ry, or Rz
-                   false, false,          // No rudder or throttle
-                   false, false, false);  // No accelerator, brake, or steering
+BleGamepad Joystick("IRGun ESP32");
+BleGamepadConfiguration JoystickConfig;
 const int pinToButtonMap = 14;            // Constant that maps the physical pin to joystick button. (pins 14-15-16)
 int LastButtonState[3] = {0, 0, 0};       // Last state of the 3 buttons
 
@@ -112,24 +114,24 @@ int count = -2;             // Set intial count
 //***************************
 //* Déclaration des Entrées *
 //***************************
-#define _tiggerPin 14             // Label Pin to Joystick buttons
-#define _startPin 15               // ET aussi  boutom le calibration - 
-#define _reloadPin  16             // ET aussi boutom le calibration + 
-#define SwitchAutoReload  4       // Mode reload Automatique On/Off
-#define SwitchSuspendMouse  7     // (Actif par défaut si non câblé) Désactive la Souris (le HID est présent, mais les data ne sont plus envoyées à la souris)
-#define SwitchSuspendJoystick 8  // (Actif par défaut si non câblé) Désactive le joystick
+#define _tiggerPin 39             // Label Pin to Joystick buttons
+#define _startPin 34              // ET aussi  boutom le calibration - 
+#define _reloadPin  36            // ET aussi boutom le calibration + 
+#define SwitchAutoReload  35      // Mode reload Automatique On/Off
+#define SwitchSuspendMouse  14    // (Actif par défaut si non câblé) Désactive la Souris (le HID est présent, mais les data ne sont plus envoyées à la souris)
+#define SwitchSuspendJoystick 12  // (Actif par défaut si non câblé) Désactive le joystick. Note: Could Fail in ESP32?
 
 //***************************
 //* Déclaration des Sorties *
 //***************************
-#define LedFire A0
-#define LedSuspendMouse A1
-#define LedSuspendJoystick  A2
-#define LedAutoReload A3
-#define LedRouge  9
-#define LedVerte  6
-#define LedBleu 5
-#define Solenoid 10
+#define LedFire 13
+#define LedSuspendMouse 25
+#define LedSuspendJoystick  26
+#define LedAutoReload 27
+#define LedRouge  16
+#define LedVerte  17
+#define LedBleu 18
+#define Solenoid 19
 #define CadenceTir 90
 #define ToggleLED(x) digitalWrite(x, !digitalRead(x))
 
@@ -192,9 +194,18 @@ void setup() {
 
   Serial.begin(9600);                        // For saving calibration (make sure your serial monitor has the same baud rate)
 
-  loadSettings();
+  JoystickConfig.setControllerType(CONTROLLER_TYPE_JOYSTICK);
+  JoystickConfig.setAutoReport(true);
+  JoystickConfig.setButtonCount(3);                 // Button Count
+  JoystickConfig.setHatSwitchCount(0);              // Hat Switch Count
+  JoystickConfig.setWhichAxes(true, true, false,    // X and Y, but no Z Axis
+                              false, false, false,  // No Rx, Ry, or Rz
+                              false, false);        // No rudder or throttle
+  JoystickConfig.setAxesMin(0);
+  JoystickConfig.setAxesMax(255);
+  Joystick.begin(&JoystickConfig);
 
-  AbsMouse.init(res_x, res_y);
+  loadSettings();
 
   // Switchs
   pinMode(SwitchAutoReload, INPUT_PULLUP);
@@ -218,9 +229,8 @@ void setup() {
   pinMode(_tiggerPin, INPUT_PULLUP);         // Set pin modes
   pinMode(_reloadPin, INPUT_PULLUP);
   pinMode(_startPin, INPUT_PULLUP);
-  Joystick.setXAxisRange(0, 255);
-  Joystick.setYAxisRange(0, 255);
-  Joystick.begin();
+
+  AbsMouse.init(res_x, res_y);
 
   AbsMouse.move((res_x / 2), (res_y / 2));          // Set mouse position to centre of the screen
 
@@ -363,8 +373,8 @@ void loop() {
       //      Serial.println("Joystick désactivé");
       //      Serial.println(" ");
       digitalWrite(LedSuspendJoystick, LOW);  // éteind la led
-      Joystick.setXAxis(127);   // Centrage du stick
-      Joystick.setYAxis(127);
+      Joystick.setX(127);   // Centrage du stick
+      Joystick.setY(127);
     }
 
     // Activation du mode Hybride (Mouvement de souris seulement) et (bouton de souris + bouton de joystick)
@@ -435,8 +445,8 @@ void Joystick_device_Stick() {
   //  Serial.print(",  yAxis = ");
   //  Serial.println(yAxis);
 
-  Joystick.setXAxis(xAxis);
-  Joystick.setYAxis(yAxis);
+  Joystick.setX(xAxis);
+  Joystick.setY(yAxis);
 }
 
 //——————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
@@ -685,7 +695,7 @@ void TIRenRafaleJoyStick() {
     unsigned long maintenant = millis();
     if (maintenant - initTime >= CadenceTir) {
       initTime = maintenant;
-      Joystick.setButton(0, HIGH);  // Bouton appuyé
+      setButton(0, HIGH);  // Bouton appuyé
       digitalWrite(LedFire, HIGH);
       ActionneSolenoid();
       rafaleCount++;
@@ -695,12 +705,12 @@ void TIRenRafaleJoyStick() {
       }
     }
     else {
-      Joystick.setButton(0, LOW);  // Bouton relâché
+      setButton(0, LOW);  // Bouton relâché
       digitalWrite(LedFire, LOW);
     }
   }
   else {  // si fire différent de 1, éteindre Led et ne pas activer le tir
-    Joystick.setButton(0, LOW);  // Bouton relâché
+    setButton(0, LOW);  // Bouton relâché
     digitalWrite(LedFire, LOW);
   }
   delay(15);  // délais de respiration (sinon la cadence de tir ne passe pas !)
@@ -713,7 +723,7 @@ void TIRenRafaleHybride() {
     if (maintenant - initTime >= CadenceTir) {  // boucle pour un intervalle de temps
       initTime = maintenant;
       AbsMouse.press(MOUSE_LEFT);
-      Joystick.setButton(0, HIGH);  // Bouton appuyé puis
+      setButton(0, HIGH);  // Bouton appuyé puis
       digitalWrite(LedFire, HIGH);
       ActionneSolenoid();
       rafaleCount++;
@@ -724,13 +734,13 @@ void TIRenRafaleHybride() {
     }
     else {
       AbsMouse.release(MOUSE_LEFT);
-      Joystick.setButton(0, LOW);  // Bouton relâché immédiatement
+      setButton(0, LOW);  // Bouton relâché immédiatement
       digitalWrite(LedFire, LOW);
     }
   }
   else {  // si fire différent de 1, éteindre Led et ne pas activer le tir
     AbsMouse.release(MOUSE_LEFT);
-    Joystick.setButton(0, LOW);  // Bouton relâché
+    setButton(0, LOW);  // Bouton relâché
     digitalWrite(LedFire, LOW);
   }
   delay(15);  // délais de respiration (sinon la cadence de tir ne passe pas !)
@@ -961,13 +971,13 @@ void Hybride_Buttons() {    // Valeurs des boutons Souris + Joystick envoyées a
     case 8:   // 1 coup avec Tir maintenu (spécial Alien3, Terminator…)
       if (ButtonState_tiggerPin == HIGH) {
         AbsMouse.press(MOUSE_LEFT);
-        Joystick.setButton(0, HIGH);  // Bouton appuyé
+        setButton(0, HIGH);  // Bouton appuyé
         digitalWrite(LedFire, HIGH);
         ActionneSolenoid();
       }
       else {
         AbsMouse.release(MOUSE_LEFT);
-        Joystick.setButton(0, LOW);  // Bouton relâché
+        setButton(0, LOW);  // Bouton relâché
         digitalWrite(LedFire, LOW);
       }
       delay(15);
@@ -979,11 +989,11 @@ void Hybride_Buttons() {    // Valeurs des boutons Souris + Joystick envoyées a
   if (ButtonState_startPin != LastButtonState[1]) { // _startPin
     if (ButtonState_startPin == LOW) {
       AbsMouse.press(MOUSE_MIDDLE);
-      Joystick.setButton(1, HIGH);  // Bouton appuyé
+      setButton(1, HIGH);  // Bouton appuyé
     }
     else {
       AbsMouse.release(MOUSE_MIDDLE);
-      Joystick.setButton(1, LOW);  // Bouton relâché
+      setButton(1, LOW);  // Bouton relâché
     }
     delay(15);
     LastButtonState[1] = ButtonState_startPin;
@@ -992,11 +1002,11 @@ void Hybride_Buttons() {    // Valeurs des boutons Souris + Joystick envoyées a
   if (ButtonState_reloadPin != LastButtonState[2]) { // _reloadPin
     if (ButtonState_reloadPin == LOW) {
       AbsMouse.press(MOUSE_RIGHT);
-      Joystick.setButton(2, HIGH);  // Bouton appuyé
+      setButton(2, HIGH);  // Bouton appuyé
     }
     else {
       AbsMouse.release(MOUSE_RIGHT);
-      Joystick.setButton(2, LOW);  // Bouton relâché
+      setButton(2, LOW);  // Bouton relâché
     }
     delay(15);
     LastButtonState[2] = ButtonState_reloadPin;
@@ -1012,12 +1022,12 @@ void Hybride_Buttons() {    // Valeurs des boutons Souris + Joystick envoyées a
     {
       //Serial.println("Reload bouton !!!");
       AbsMouse.press(MOUSE_RIGHT);
-      Joystick.setButton(2, HIGH); // pin 16
+      setButton(2, HIGH); // pin 16
     }
     else
     {
       AbsMouse.release(MOUSE_RIGHT);
-      Joystick.setButton(2, LOW); // pin 16
+      setButton(2, LOW); // pin 16
     }
     delay(15);
   }
@@ -1026,7 +1036,7 @@ void Hybride_Buttons() {    // Valeurs des boutons Souris + Joystick envoyées a
     //Serial.println("Mode Reload désactivé");
     digitalWrite(LedAutoReload, LOW);  // Éteind la led Autoreload
     AbsMouse.release(MOUSE_RIGHT);
-    Joystick.setButton(2, LOW);
+    setButton(2, LOW);
   }
 }
 
@@ -1041,7 +1051,7 @@ void Joystick_device_Buttons() {    // Valeurs des boutons du Joystick envoyées
   //    int currentButtonState = !digitalRead(index + pinToButtonMap);
   //    if (currentButtonState != LastButtonState[index])
   //    {
-  //      Joystick.setButton(index, currentButtonState);
+  //      setButton(index, currentButtonState);
   //      LastButtonState[index] = currentButtonState;
   //    }
   //  }
@@ -1052,17 +1062,17 @@ void Joystick_device_Buttons() {    // Valeurs des boutons du Joystick envoyées
 
   // Routine pour tirer (appuie maintenu)
   //  if (Etat_bouton_Tir != LastButtonState[0]) {
-  //    Joystick.setButton(0, Etat_bouton_Tir);
+  //    setButton(0, Etat_bouton_Tir);
   //    LastButtonState[0] = Etat_bouton_Tir;
   //  }
 
   // Routine alternative pour tirer (appuie maintenu)
   //  if (Etat_bouton_Tir != LastButtonState[0]) {
   //    if (Etat_bouton_Tir == HIGH) {
-  //      Joystick.setButton(0, HIGH);  // Bouton appuyé
+  //      setButton(0, HIGH);  // Bouton appuyé
   //    }
   //    else {
-  //      Joystick.setButton(0, LOW);  // Bouton relâché
+  //      setButton(0, LOW);  // Bouton relâché
   //    }
   //    LastButtonState[0] = Etat_bouton_Tir;
   //  }
@@ -1138,12 +1148,12 @@ void Joystick_device_Buttons() {    // Valeurs des boutons du Joystick envoyées
       break;
     case 8:   // 1 coup avec Tir maintenu (spécial Alien3, Terminator…)
       if (Etat_bouton_Tir == HIGH) {
-        Joystick.setButton(0, HIGH);  // Bouton appuyé
+        setButton(0, HIGH);  // Bouton appuyé
         clignotteLED();
         ActionneSolenoid();
       }
       else {
-        Joystick.setButton(0, LOW);  // Bouton relâché
+        setButton(0, LOW);  // Bouton relâché
         digitalWrite(LedFire, LOW);
       }
       delay(15);
@@ -1153,12 +1163,12 @@ void Joystick_device_Buttons() {    // Valeurs des boutons du Joystick envoyées
   }
 
   if (Etat_bouton_start != LastButtonState[1]) {
-    Joystick.setButton(1, Etat_bouton_start);
+    setButton(1, Etat_bouton_start);
     LastButtonState[1] = Etat_bouton_start;
   }
 
   if (Etat_bouton_Reload != LastButtonState[2]) {
-    Joystick.setButton(2, Etat_bouton_Reload);
+    setButton(2, Etat_bouton_Reload);
     LastButtonState[2] = Etat_bouton_Reload;
   }
 
@@ -1171,11 +1181,11 @@ void Joystick_device_Buttons() {    // Valeurs des boutons du Joystick envoyées
     if ((see0 == 0) || (see1 == 0) || (see2 == 0) || (see3 == 0))  // si on sort de l'écran
     {
       //Serial.println("Reload bouton !!!");
-      Joystick.setButton(2, HIGH); // pin 16
+      setButton(2, HIGH); // pin 16
     }
     else
     {
-      Joystick.setButton(2, LOW); // pin 16
+      setButton(2, LOW); // pin 16
     }
 
   }
@@ -1183,7 +1193,19 @@ void Joystick_device_Buttons() {    // Valeurs des boutons du Joystick envoyées
   {
     //Serial.println("Mode Reload désactivé");
     digitalWrite(LedAutoReload, LOW);  // Éteind la led Autoreload
-    Joystick.setButton(2, LOW);
+    setButton(2, LOW);
+  }
+}
+
+void setButton(uint8_t button, bool value)
+{
+  if (value)
+  {
+    Joystick.press(button);
+  }
+  else
+  {
+    Joystick.release(button);
   }
 }
 
