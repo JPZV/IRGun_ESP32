@@ -60,7 +60,7 @@
 #error "This project must run on an ESP32."
 #endif
 
-int xCenter = 512; // Open serial monitor and update these values to save calibration manualy
+int xCenter = 512; // Open serial monitor and update these values to save calibration manually
 int yCenter = 450;
 float xOffset = 147;
 float yOffset = 82;
@@ -71,8 +71,6 @@ float yOffset = 82;
 //**************************
 BleGamepad Joystick("IRGun ESP32");
 BleGamepadConfiguration JoystickConfig;
-const int pinToButtonMap = 14;      // Constant that maps the physical pin to joystick button. (pins 14-15-16)
-int LastButtonState[3] = {0, 0, 0}; // Last state of the 3 buttons
 
 //******************************
 //* Variables for IRCamera *
@@ -92,7 +90,7 @@ int MoveXAxis; // Unconstrained mouse postion
 int MoveYAxis;
 int conMoveXAxis; // Constrained mouse postion
 int conMoveYAxis;
-int count = -2; // Set intial count
+int count = -2; // Set initial count
 
 //***************************
 //* Input defines *
@@ -123,21 +121,39 @@ int count = -2; // Set intial count
 //**********************
 #define ResolutionAxisX 1023
 #define ResolutionAxisY 768
-unsigned int NBdeTirs = 0;
-unsigned int fire = 0;
+unsigned int shotCount = 0;
+bool shouldFire = false;
 const int R = 1;
 const int G = 1;
 const int B = 1;
+enum RainbowSequence
+{
+    RAINBOW_RED,
+    RAINBOW_YELLOW,
+    RAINBOW_GREEN,
+    RAINBOW_CYAN,
+    RAINBOW_BLUE,
+    RAINBOW_VIOLET,
+    RAINBOW_MAX
+};
+unsigned short currentRainbowSequence;
 unsigned int varR = 255;
 unsigned int varG = 0;
 unsigned int varB = 0;
-unsigned int SequenceRed = 1;
-unsigned int SequenceYellow = 0;
-unsigned int SequenceGreen = 0;
-unsigned int SequenceCyan = 0;
-unsigned int SequenceBlue = 0;
-unsigned int SequenceViolet = 0;
-unsigned int Automatic = 1;
+
+enum AutomaticModes
+{
+    AUTOMATIC_1_SHOT,
+    AUTOMATIC_2_SHOT,
+    AUTOMATIC_3_SHOT,
+    AUTOMATIC_4_SHOT,
+    AUTOMATIC_5_SHOT,
+    AUTOMATIC_6_SHOT,
+    AUTOMATIC_MACHINE_GUN,
+    AUTOMATIC_SHOT_SUSTAINED,
+    AUTOMATIC_MAX
+};
+unsigned short currentAutomaticMode = AUTOMATIC_1_SHOT;
 unsigned int burstCount = 0;
 
 // Buttons states
@@ -153,15 +169,17 @@ int ButtonValid = 0;
 int LastButtonValid = 0;
 int ButtonState_Calibration = 0;
 int LastButtonState_Calibration = 0;
-// int ButtonState_Trigger = 0;
-int LastButtonState_Trigger = 0;
-// int ButtonState_Reload = 0;
-int LastButtonState_Reload = 0;
-// int ButtonState_Start = 0;
-int LastButtonState_Start = 0;
+bool LastButtonState_Trigger = 0;
+bool LastButtonState_Reload = 0;
+bool LastButtonState_Start = 0;
 
-int plus = 0;
-int minus = 0;
+bool plus = 0;
+bool minus = 0;
+
+unsigned long lastFlashLEDTime = 0;
+unsigned long lastSolenoidTime = 0;
+unsigned long lastAutoReloadTime = 0;
+unsigned long lastFireTime = 0;
 
 //************************
 //* IRCamera Statement *
@@ -221,7 +239,7 @@ void setup()
     delay(500);
 
     // Turn off the RGB Led
-    ledRVB(0, 0, 0);
+    ledRGB(0, 0, 0);
 }
 
 // ——————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
@@ -230,23 +248,19 @@ void setup()
 // #############
 void loop()
 {
-
-    /* ------------------ START/PAUSE MOUSE ---------------------- */
+    // ------------------ START/PAUSE MOUSE ----------------------
 
     if (count > 3)
     {
 
-        skip();
+        skipCalibration();
         mouseCount();
-        //  PrintResults();
+        //printResults();
     }
-
-    /* ---------------------- CENTER --------------------------- */
+    // ---------------------- CENTER ---------------------------
     // START of the calibration procedure
-
     else if (count > 2)
     {
-
         AbsMouse.move((ResolutionAxisX / 2), (ResolutionAxisY / 2));
 
         mouseCount();
@@ -255,14 +269,11 @@ void loop()
         xCenter = finalX;
         yCenter = finalY;
 
-        //  PrintResults();
+        //printResults();
     }
-
-    /* -------------------- OFFSET ------------------------- */
-
+    // -------------------- OFFSET -------------------------
     else if (count > 1)
     {
-
         mouseCount();
         AbsMouse.move(conMoveXAxis, conMoveYAxis);
         getPosition();
@@ -271,30 +282,22 @@ void loop()
         conMoveXAxis = ResolutionAxisX / 2;
         conMoveYAxis = constrain(MoveYAxis, 0, ResolutionAxisY);
 
-        if (plus == 1)
+        if (plus)
         {
             yOffset = yOffset + 1;
             delay(10);
         }
-        else
-        {
-        }
 
-        if (minus == 1)
+        if (minus)
         {
             yOffset = yOffset - 1;
             delay(10);
         }
-        else
-        {
-        }
 
-        //   PrintResults();
+        //printResults();
     }
-
     else if (count > 0)
     {
-
         mouseCount();
         AbsMouse.move(conMoveXAxis, conMoveYAxis);
         getPosition();
@@ -303,30 +306,22 @@ void loop()
         conMoveXAxis = constrain(MoveXAxis, 0, ResolutionAxisX);
         conMoveYAxis = ResolutionAxisY / 2;
 
-        if (plus == 1)
+        if (plus)
         {
             xOffset = xOffset + 1;
             delay(10);
         }
-        else
-        {
-        }
 
-        if (minus == 1)
+        if (minus)
         {
             xOffset = xOffset - 1;
             delay(10);
         }
-        else
-        {
-        }
 
-        //  PrintResults();
+        //printResults();
     }
-
     else if (count > -1)
     {
-
         count = count - 1;
 
         EEPROM.write(0, xCenter - 256);
@@ -334,10 +329,9 @@ void loop()
         EEPROM.write(2, xOffset);
         EEPROM.write(3, yOffset);
     }
-    // EnND of the calibration procedure
-    /* ---------------------- LET'S GO --------------------------- */
+    // End of the calibration procedure
+    // ---------------------- LET'S GO ---------------------------
     // Normal use of the gun
-
     else
     {
 
@@ -368,8 +362,8 @@ void loop()
         {
             //Serial.println("Joystick enabled");
             digitalWrite(LedSuspendJoystickPin, HIGH);  // Turn on the Led
-            Joystick_device_Buttons();                  // Buttons sent to HID
-            Joystick_device_Stick();                    // Movements sent to HID
+            joystickButtons();                  // Buttons sent to HID
+            joystick_device_Stick();                    // Movements sent to HID
         }
         // Completely disabling the joystick
         else
@@ -388,7 +382,7 @@ void loop()
             digitalWrite(LedSuspendMousePin, HIGH);     // Turn on the Led
             digitalWrite(LedSuspendJoystickPin, HIGH);  // Turn on the Led
             AbsMouse.move(conMoveXAxis, conMoveYAxis);  // Movements sent to HID
-            Hybride_Buttons();                          // Buttons sent to HID
+            hybridButtons();                           // Buttons sent to HID
         }
 
         getPosition(); // Retrieving IR camera values
@@ -398,22 +392,22 @@ void loop()
         conMoveXAxis = constrain(MoveXAxis, 0, ResolutionAxisX);
         conMoveYAxis = constrain(MoveYAxis, 0, ResolutionAxisY);
 
-        //PrintResults();
-        reset();
+        //printResults();
+        resetCalibration();
     }
-    ModeAutomatic();
-    LedRGBautomatic();
+    modeAutomatic();
+    ledRGBautomatic();
 }
 
-/*        -----------------------------------------------        */
-/* --------------------------- METHODS ------------------------- */
-/*        -----------------------------------------------        */
+//        -----------------------------------------------       
+// --------------------------- METHODS -------------------------
+//        -----------------------------------------------       
 
 // ——————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
 // ####################
-// # Gestion IRCamera #
+// # IRCamera Methods #
 // ####################
-// Get tilt adjusted position from IR postioning camera
+// Get tilt adjusted position from IR positioning camera
 void getPosition()
 {
 
@@ -427,10 +421,10 @@ void getPosition()
         see1 = mySamco.testSee(1);
         see2 = mySamco.testSee(2);
         see3 = mySamco.testSee(3);
-        //    Serial.print("finalX: ");
-        //    Serial.print(finalX);
-        //    Serial.print(",  finalY: ");
-        //    Serial.print(finalY);
+        //Serial.print("finalX: ");
+        //Serial.print(finalX);
+        //Serial.print(",  finalY: ");
+        //Serial.print(finalY);
     }
     else
     {
@@ -440,17 +434,17 @@ void getPosition()
 
 // ——————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
 // ##################################
-// # Gestion mouvements de Joystick #
+// # Joystick movements  #
 // ##################################
-void Joystick_device_Stick()
+void joystick_device_Stick()
 {
-    int xAxis = map(conMoveXAxis, 0, 1023, 0, 255); // Avec inversion des axes requise
+    int xAxis = map(conMoveXAxis, 0, 1023, 0, 255); // Reverse axis required
     int yAxis = map(conMoveYAxis, 0, 768, 0, 255);
 
-    //  Serial.print("Joystick xAxis = ");
-    //  Serial.print(xAxis);
-    //  Serial.print(",  yAxis = ");
-    //  Serial.println(yAxis);
+    //Serial.print("Joystick xAxis = ");
+    //Serial.print(xAxis);
+    //Serial.print(",  yAxis = ");
+    //Serial.println(yAxis);
 
     Joystick.setX(xAxis);
     Joystick.setY(yAxis);
@@ -458,191 +452,138 @@ void Joystick_device_Stick()
 
 // ——————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
 // ####################
-// # Gestion LEDs RGB #
+// # LEDs Methods #
 // ####################
+
 //  http://www.mon-club-elec.fr/pmwiki_mon_club_elec/pmwiki.php?n=MAIN.ArduinoInitiationLedsDiversTestLedRVBac
-//---- fonction pour combiner couleurs ON/OFF ----
-void ledRVB(int Red, int Green, int Blue)
+//---- function to set the LED color (Binary) ----
+void ledRGB(bool Red, bool Green, bool Blue)
 {
-    if (Red == 1)
-        digitalWrite(LedRedPin, LOW); // allume couleur
-    if (Red == 0)
-        digitalWrite(LedRedPin, HIGH); // éteint couleur
+    if (Red)
+        digitalWrite(LedRedPin, LOW); // Turn on Red
+    else
+        digitalWrite(LedRedPin, HIGH); // Turn off Red
 
-    if (Green == 1)
-        digitalWrite(LedGreenPin, LOW); // allume couleur
-    if (Green == 0)
-        digitalWrite(LedGreenPin, HIGH); // éteint couleur
+    if (Green)
+        digitalWrite(LedGreenPin, LOW); // Turn on Green
+    else
+        digitalWrite(LedGreenPin, HIGH); // Turn off Green
 
-    if (Blue == 1)
-        digitalWrite(LedBluePin, LOW); // allume couleur
-    if (Blue == 0)
-        digitalWrite(LedBluePin, HIGH); // éteint couleur
+    if (Blue)
+        digitalWrite(LedBluePin, LOW); // Turn on Blue
+    else
+        digitalWrite(LedBluePin, HIGH); // Turn off Blue
 }
 
-//---- fonction pour variation progressive des couleurs ----
-void ledRVBpwm(int pwmRed, int pwmGreen, int pwmBlue)
-{                                          // reçoit valeur 0-255 par couleur
-    analogWrite(LedRedPin, 255 - pwmRed); // impulsion largeur voulue sur la broche 0 = 0% et 255 = 100% haut
-    analogWrite(LedGreenPin, 255 - pwmGreen);  // impulsion largeur voulue sur la broche 0 = 0% et 255 = 100% haut
-    analogWrite(LedBluePin, 255 - pwmBlue);   // impulsion largeur voulue sur la broche 0 = 0% et 255 = 100% haut
+//---- Function to set the LED color (progressive) ----
+//Each values are from 0 to 255, where 0 is 0% and 255 is 100%
+void ledRGBProgressive(unsigned short pwmRed, unsigned short pwmGreen, unsigned short pwmBlue)
+{
+    analogWrite(LedRedPin, 255 - pwmRed);
+    analogWrite(LedGreenPin, 255 - pwmGreen);
+    analogWrite(LedBluePin, 255 - pwmBlue);
 }
 
-//---- fonction pour fondu arc-en-ciel ----
-void FonduCouleurs()
+//---- Rainbow fade function ----
+//Sequence:
+//- Red
+//- Yellow
+//- Green
+//- Cyan
+//- Blue
+//- Violet
+void rainbowFade()
 {
-    //  Séquence :
-    //  255,0,0 red
-    //  255,255,0 yellow
-    //  0,255,0 green
-    //  0,255,255 cyan
-    //  0,0,255 blue
-    //  255,0,255 violet
-    //  On démarre en red avec varR,varG,varB = 255,0,0
+    ledRGBProgressive(varR, varG, varB); // Set the color in the LED
 
-    ledRVBpwm(varR, varG, varB); // génère impulsion largeur voulue pour la couleur
-
-    if (SequenceRed == 1)
-    {           // 255,0,0 Red
-        varG++; // augmente le Green
-        if (varG == 255)
-        { // on obtient Yellow (255,255,0)
-            SequenceRed = 0;
-            SequenceYellow = 1; // On active la prochaine séquence
-            SequenceGreen = 0;
-            SequenceCyan = 0;
-            SequenceBlue = 0;
-            SequenceViolet = 0;
-        }
-    }
-
-    if (SequenceYellow == 1)
-    {           // 255,255,0 Yellow
-        varR--; // on baisse le Red
-        if (varR == 0)
-        { // ne reste que le Green  (0,255,0)
-            SequenceRed = 0;
-            SequenceYellow = 0;
-            SequenceGreen = 1; // On active la prochaine séquence
-            SequenceCyan = 0;
-            SequenceBlue = 0;
-            SequenceViolet = 0;
-        }
-    }
-
-    if (SequenceGreen == 1)
-    {           // 0,255,0 Green
-        varB++; // augmente le blue
-        if (varB == 255)
-        { // on obtient le Cyan  (0,255,255)
-            SequenceRed = 0;
-            SequenceYellow = 0;
-            SequenceGreen = 0;
-            SequenceCyan = 1; // On active la prochaine séquence
-            SequenceBlue = 0;
-            SequenceViolet = 0;
-        }
-    }
-
-    if (SequenceCyan == 1)
-    {           // 0,255,255 Cyan
-        varG--; // on baisse le green
-        if (varG == 0)
-        { // on obtient de blue (0,0,255)
-            SequenceRed = 0;
-            SequenceYellow = 0;
-            SequenceGreen = 0;
-            SequenceCyan = 0;
-            SequenceBlue = 1; // On active la prochaine séquence
-            SequenceViolet = 0;
-        }
-    }
-
-    if (SequenceBlue == 1)
-    {           // 0,0,255 Blue
-        varR++; // augmenter le Red
-        if (varR == 255)
-        { // on obtient le Violet (255,0,255)
-            SequenceRed = 0;
-            SequenceYellow = 0;
-            SequenceGreen = 0;
-            SequenceCyan = 0;
-            SequenceBlue = 0;
-            SequenceViolet = 1; // On active la prochaine séquence
-        }
-    }
-
-    if (SequenceViolet == 1)
-    {           // 255,0,255 Violet
-        varB--; // on baisse le Blue
-        if (varB == 0)
-        { // on obtient le Red (255,0,0)
-            Serial.print("SequenceRed");
-            SequenceRed = 1; // On active la prochaine séquence
-            SequenceYellow = 0;
-            SequenceGreen = 0;
-            SequenceCyan = 0;
-            SequenceBlue = 0;
-            SequenceViolet = 0;
-        }
-    }
-    //  Serial.print("");
-    //  Serial.print("varR : ");
-    //  Serial.print(varR);
-    //  Serial.print(" | varG : ");
-    //  Serial.print(varG);
-    //  Serial.print(" | varB : ");
-    //  Serial.println(varB);
-    //  delay(4);
-}
-
-void LedRGBautomatic()
-{
-    switch (Automatic)
+    switch (currentRainbowSequence)
     {
-    case 1:
-        ledRVB(R, G, 0); // yellow
-        break;
-    case 2:
-        ledRVB(0, G, 0); // green
-        break;
-    case 3:
-        ledRVB(0, 0, B); // blue
-        break;
-    case 4:
-        ledRVB(R, G, B); // blanc
-        break;
-    case 5:
-        ledRVB(0, G, B); // cyan
-        break;
-    case 6:
-        ledRVB(R, 0, B); // violet
-        break;
-    case 7:
-        FonduCouleurs(); // Fondu de couleur red-orange-yellow-green-cyan-blue-violet-rose
-        break;
-    case 8:
-        ledRVB(R, 0, 0); // red
-        break;
-    default:
-        // if nothing else matches, do the default
-        // default is optional
-        break;
+        default:
+        case RAINBOW_RED:
+            varG++;
+            if (varG == 255)
+                currentRainbowSequence = RAINBOW_YELLOW;
+            break;
+        case RAINBOW_YELLOW:
+            varR--;
+            if (varR == 0)
+                currentRainbowSequence = RAINBOW_GREEN;
+            break;
+        case RAINBOW_GREEN:
+            varB++;
+            if (varB == 255)
+                currentRainbowSequence = RAINBOW_CYAN;
+            break;
+        case RAINBOW_CYAN:
+            varG--;
+            if (varG == 0)
+                currentRainbowSequence = RAINBOW_BLUE;
+            break;
+        case RAINBOW_BLUE:
+            varR++;
+            if (varR == 255)
+                currentRainbowSequence = RAINBOW_VIOLET;
+            break;
+        case RAINBOW_VIOLET:
+            varB--;
+            if (varB == 0)
+                currentRainbowSequence = RAINBOW_RED;
+            break;
+    }
+
+    //Serial.print("");
+    //Serial.print("varR : ");
+    //Serial.print(varR);
+    //Serial.print(" | varG : ");
+    //Serial.print(varG);
+    //Serial.print(" | varB : ");
+    //Serial.println(varB);
+    //delay(4);
+}
+
+void ledRGBautomatic()
+{
+    switch (currentAutomaticMode)
+    {
+        default:
+        case AUTOMATIC_1_SHOT:
+            ledRGB(R, G, 0); // Yellow
+            break;
+        case AUTOMATIC_2_SHOT:
+            ledRGB(0, G, 0); // Green
+            break;
+        case AUTOMATIC_3_SHOT:
+            ledRGB(0, 0, B); // Blue
+            break;
+        case AUTOMATIC_4_SHOT:
+            ledRGB(R, G, B); // White
+            break;
+        case AUTOMATIC_5_SHOT:
+            ledRGB(0, G, B); // Cyan
+            break;
+        case AUTOMATIC_6_SHOT:
+            ledRGB(R, 0, B); // Violet
+            break;
+        case AUTOMATIC_MACHINE_GUN:
+            rainbowFade(); // Do the Rainbow effect
+            break;
+        case AUTOMATIC_SHOT_SUSTAINED:
+            ledRGB(R, 0, 0); // Red
+            break;
     }
 }
 
 // ——————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
 // #####################################
-// # Gestion événements opto-mécanique #
+// # Opto-mechanical event management #
 // #####################################
 
-void clignotteLED()
+void flashLED()
 {
-    static unsigned long initTime = 0;
-    unsigned long maintenant = millis();
-    if (maintenant - initTime >= 90)
+    unsigned long currentTime = millis();
+    if (currentTime - lastFlashLEDTime >= 90)
     {
-        initTime = maintenant;
+        lastFlashLEDTime = currentTime;
         digitalWrite(LedFirePin, HIGH);
     }
     else
@@ -651,678 +592,474 @@ void clignotteLED()
     }
 }
 
-void ActionneSolenoid()
+void fireSolenoid()
 {
-    static unsigned long initTime = 0;
-    unsigned long maintenant = millis();
-    if (maintenant - initTime >= CadenceTir)
+    unsigned long currentTime = millis();
+    if (currentTime - lastSolenoidTime >= CadenceTir)
     {
-        initTime = maintenant;
-        // Contrairement à la Led, il faut un peu de temps au mécanisme pour changer d'état
+        lastSolenoidTime = currentTime;
+        // Unlike the LED, it takes a little time for the mechanism to change state
         unsigned long startTime = millis();
-        unsigned long duree = 25; // maintient 25 µs pour que le mécanisme ait le temps de changer d'état
-        while (millis() < startTime + duree)
+        // hold it by 25 µs so the mechanism has time to change state
+        while (millis() < startTime + 25)
         {
-            digitalWrite(SolenoidPin, HIGH); // collé
+            digitalWrite(SolenoidPin, HIGH); // Hold
         }
     }
     else
     {
-        digitalWrite(SolenoidPin, LOW); // repos
+        digitalWrite(SolenoidPin, LOW); // Free
     }
-    delay(15); // délais de respiration (sinon la cadence de tir ne passe pas !)
+    delay(15); // breathing delays (otherwise the rate of fire does not pass!)
     digitalWrite(SolenoidPin, LOW);
 }
 
 // ——————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
 // #######################
-// # Gestion Mode de tir #
+// # Firing mode #
 // #######################
-// Sélection du mode de tir : 1 coup, 2 coups, 3 coups, 4 coups, 5 coups, 6 coups, MachineGun, 1 coup maintenu
-void ModeAutomatic()
+
+//Firing mode selection:
+//- 1 shot
+//- 2 shots
+//- 3 shots
+//- 4 shots
+//- 5 shots
+//- 6 shots
+//- MachineGun
+//- 1 shot sustained
+void modeAutomatic()
 { 
     int ButtonState_Reload = digitalRead(ReloadPin);
     AutoReload = digitalRead(SwitchAutoReloadPin);
-    if (AutoReload == 0) // Si le mode Reload est activé avec le switch Reload
+    //If Reload mode is activated with the Reload switch
+    if (AutoReload == LOW)
     {
-        LedRGBautomatic();
-        if (ButtonState_Reload == 0)
+        ledRGBautomatic();
+        if (ButtonState_Reload == LOW)
         {
-            static unsigned long initTime = 0;
-            unsigned long maintenant = millis();
-            if (maintenant - initTime >= 300)
+            unsigned long currentTime = millis();
+            if (currentTime - lastAutoReloadTime >= 300)
             {
-                initTime = maintenant;
-                Automatic++;
-                if (Automatic >= 9)
-                {
-                    Automatic = 1;
-                }
+                lastAutoReloadTime = currentTime;
+                currentAutomaticMode = (currentAutomaticMode + 1) % AUTOMATIC_MAX;
             }
         }
     }
 }
 
-void TIRenRafaleSouris()
+void mouseShotBurst()
 {
-    if (fire == 1)
+    if (shouldFire)
     {
-        static unsigned long initTime = 0;
-        unsigned long maintenant = millis();
-        if (maintenant - initTime >= CadenceTir)
+        unsigned long currentTime = millis();
+        if (currentTime - lastFireTime >= CadenceTir)
         {
-            initTime = maintenant;
-            AbsMouse.press(MOUSE_LEFT);
+            lastFireTime = currentTime;
+            setMouseButton(MOUSE_LEFT, true);
             digitalWrite(LedFirePin, HIGH);
-            ActionneSolenoid();
+            fireSolenoid();
             burstCount++;
-            if (burstCount == NBdeTirs)
+            if (burstCount == shotCount)
             {
-                fire = 0;
+                shouldFire = false;
                 burstCount = 0;
             }
         }
         else
         {
-            AbsMouse.release(MOUSE_LEFT);
+            setMouseButton(MOUSE_LEFT, false);
             digitalWrite(LedFirePin, LOW);
         }
     }
     else
-    { // si fire différent de 1, éteindre Led et ne pas activer le tir
-        AbsMouse.release(MOUSE_LEFT);
+    {
+        // If fire differs from 1, turn off the Led and don't fire the gun
+        setMouseButton(MOUSE_LEFT, false);
         digitalWrite(LedFirePin, LOW);
     }
-    delay(10); // délais de respiration (sinon ça plante…)
+    delay(10);
 }
 
-void TIRenRafaleJoyStick()
+void joystickShotBurst()
 {
-    if (fire == 1)
+    if (shouldFire)
     {
-        static unsigned long initTime = 0;
-        unsigned long maintenant = millis();
-        if (maintenant - initTime >= CadenceTir)
+        unsigned long currentTime = millis();
+        if (currentTime - lastFireTime >= CadenceTir)
         {
-            initTime = maintenant;
-            setButton(0, HIGH); // Bouton appuyé
+            lastFireTime = currentTime;
+            setJoystickButton(0, HIGH); // Press the button
             digitalWrite(LedFirePin, HIGH);
-            ActionneSolenoid();
+            fireSolenoid();
             burstCount++;
-            if (burstCount == NBdeTirs)
+            if (burstCount == shotCount)
             {
-                fire = 0;
+                shouldFire = false;
                 burstCount = 0;
             }
         }
         else
         {
-            setButton(0, LOW); // Bouton relâché
+            setJoystickButton(0, LOW); // Release the button
             digitalWrite(LedFirePin, LOW);
         }
     }
     else
-    {                      // si fire différent de 1, éteindre Led et ne pas activer le tir
-        setButton(0, LOW); // Bouton relâché
+    {
+        // If fire differs from 1, turn off the Led and don't fire the gun
+        setJoystickButton(0, LOW); // Release the button
         digitalWrite(LedFirePin, LOW);
     }
-    delay(15); // délais de respiration (sinon la cadence de tir ne passe pas !)
+    delay(15);
 }
 
-void TIRenRafaleHybride()
+void hybridShotBurst()
 {
-    if (fire == 1)
+    if (shouldFire)
     {
-        static unsigned long initTime = 0;
-        unsigned long maintenant = millis();
-        if (maintenant - initTime >= CadenceTir)
-        { // boucle pour un intervalle de temps
-            initTime = maintenant;
-            AbsMouse.press(MOUSE_LEFT);
-            setButton(0, HIGH); // Bouton appuyé puis
+        unsigned long currentTime = millis();
+        if (currentTime - lastFireTime >= CadenceTir)
+        {
+            lastFireTime = currentTime;
+            setMouseButton(MOUSE_LEFT, true);
+            setJoystickButton(0, HIGH); // Press the button
             digitalWrite(LedFirePin, HIGH);
-            ActionneSolenoid();
+            fireSolenoid();
             burstCount++;
-            if (burstCount == NBdeTirs)
+            if (burstCount == shotCount)
             {
-                fire = 0;
+                shouldFire = false;
                 burstCount = 0;
             }
         }
         else
         {
-            AbsMouse.release(MOUSE_LEFT);
-            setButton(0, LOW); // Bouton relâché immédiatement
+            setMouseButton(MOUSE_LEFT, false);
+            setJoystickButton(0, LOW); // Release the button
             digitalWrite(LedFirePin, LOW);
         }
     }
     else
-    { // si fire différent de 1, éteindre Led et ne pas activer le tir
-        AbsMouse.release(MOUSE_LEFT);
-        setButton(0, LOW); // Bouton relâché
+    {
+        // If fire differs from 1, turn off the Led and don't fire the gun
+        setMouseButton(MOUSE_LEFT, false);
+        setJoystickButton(0, LOW); // Release the button
         digitalWrite(LedFirePin, LOW);
     }
-    delay(15); // délais de respiration (sinon la cadence de tir ne passe pas !)
+    delay(15);
 }
 
 // ——————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
 // #############################
-// # Gestion Boutons de Souris #
+// # Mouse buttons #
 // #############################
-// Valeurs pour la souris envoyées au HID Device
+
+// Mouse values sent to HID Device
 void mouseButtons()
 {
+    bool ButtonState_Trigger = !digitalRead(TriggerPin);
+    bool ButtonState_Reload = !digitalRead(ReloadPin);
+    bool ButtonState_Start = !digitalRead(StartPin);
 
-    int ButtonState_Trigger = digitalRead(TriggerPin);
-    int ButtonState_Reload = digitalRead(ReloadPin);
-    int ButtonState_Start = digitalRead(StartPin);
-
-    switch (Automatic)
+    switch (currentAutomaticMode)
     {
-    case 1:
-        if (ButtonState_Trigger != LastButtonState_Trigger)
-        {
-            if (ButtonState_Trigger == LOW)
+        default:
+        case AUTOMATIC_1_SHOT:
+        case AUTOMATIC_2_SHOT:
+        case AUTOMATIC_3_SHOT:
+        case AUTOMATIC_4_SHOT:
+        case AUTOMATIC_5_SHOT:
+        case AUTOMATIC_6_SHOT:
+            if (ButtonState_Trigger != LastButtonState_Trigger)
             {
-                fire = 1;
+                if (ButtonState_Trigger)
+                {
+                    shouldFire = true;
+                }
+                LastButtonState_Trigger = ButtonState_Trigger;
             }
-            LastButtonState_Trigger = ButtonState_Trigger;
-        }
-        NBdeTirs = 1;
-        TIRenRafaleSouris();
-        break;
-    case 2:
-        if (ButtonState_Trigger != LastButtonState_Trigger)
-        {
-            if (ButtonState_Trigger == LOW)
+            shotCount = currentAutomaticMode + 1;
+            mouseShotBurst();
+            break;
+        case AUTOMATIC_MACHINE_GUN:
+            if (ButtonState_Trigger)
             {
-                fire = 1;
+                shouldFire = true;
             }
-            LastButtonState_Trigger = ButtonState_Trigger;
-        }
-        NBdeTirs = 2;
-        TIRenRafaleSouris();
-        break;
-    case 3:
-        if (ButtonState_Trigger != LastButtonState_Trigger)
-        {
-            if (ButtonState_Trigger == LOW)
+            shotCount = 1;
+            mouseShotBurst();
+            break;
+        case AUTOMATIC_SHOT_SUSTAINED:
+            // Button pressed and held for certain games (Alien, T2, etc...)
+            if (ButtonState_Trigger)
             {
-                fire = 1;
+                setMouseButton(MOUSE_LEFT, true);
+                flashLED();
+                fireSolenoid();
             }
-            LastButtonState_Trigger = ButtonState_Trigger;
-        }
-        NBdeTirs = 3;
-        TIRenRafaleSouris();
-        break;
-    case 4:
-        if (ButtonState_Trigger != LastButtonState_Trigger)
-        {
-            if (ButtonState_Trigger == LOW)
+            else
             {
-                fire = 1;
+                setMouseButton(MOUSE_LEFT, false); // Button release
+                digitalWrite(LedFirePin, LOW);
             }
-            LastButtonState_Trigger = ButtonState_Trigger;
-        }
-        NBdeTirs = 4;
-        TIRenRafaleSouris();
-        break;
-    case 5:
-        if (ButtonState_Trigger != LastButtonState_Trigger)
-        {
-            if (ButtonState_Trigger == LOW)
-            {
-                fire = 1;
-            }
-            LastButtonState_Trigger = ButtonState_Trigger;
-        }
-        NBdeTirs = 5;
-        TIRenRafaleSouris();
-        break;
-    case 6:
-        if (ButtonState_Trigger != LastButtonState_Trigger)
-        {
-            if (ButtonState_Trigger == LOW)
-            {
-                fire = 1;
-            }
-            LastButtonState_Trigger = ButtonState_Trigger;
-        }
-        NBdeTirs = 6;
-        TIRenRafaleSouris();
-        break;
-    case 7: // Autofire MachineGun
-        if (ButtonState_Trigger == LOW)
-        {
-            fire = 1;
-        }
-        NBdeTirs = 1;
-        TIRenRafaleSouris();
-        break;
-    case 8: // 1 coup avec Tir maintenu (spécial Alien3, Terminator…)
-        if (ButtonState_Trigger == LOW)
-        {
-            AbsMouse.press(MOUSE_LEFT); // Bouton appuyé et maintenu pour certains jeux (Alien, T2,…)
-            clignotteLED();
-            ActionneSolenoid();
-        }
-        else
-        {
-            AbsMouse.release(MOUSE_LEFT); // Bouton relâché
-            digitalWrite(LedFirePin, LOW);
-        }
-        delay(10);
-        break;
-    default:
-        break;
+            delay(10);
+            break;
     }
 
+    // Reload button
     if (ButtonState_Reload != LastButtonState_Reload)
-    { // ReloadPin
-        if (ButtonState_Reload == LOW)
-        {
-            AbsMouse.press(MOUSE_RIGHT);
-        }
-        else
-        {
-            AbsMouse.release(MOUSE_RIGHT);
-        }
+    {
+        setMouseButton(MOUSE_RIGHT, ButtonState_Reload);
         delay(10);
         LastButtonState_Reload = ButtonState_Reload;
     }
 
+    // Start button
     if (ButtonState_Start != LastButtonState_Start)
-    { // StartPin
-        if (ButtonState_Start == LOW)
-        {
-            AbsMouse.press(MOUSE_MIDDLE);
-        }
-        else
-        {
-            AbsMouse.release(MOUSE_MIDDLE);
-        }
+    {
+        setMouseButton(MOUSE_MIDDLE, ButtonState_Start);
         delay(10);
         LastButtonState_Start = ButtonState_Start;
     }
 
-    /* Mode RELOAD automatique si le curseur sort de l'écran, géré par logiciel */
+    // Automatic reload mode if the cursor leaves the screen, managed by software
     AutoReload = digitalRead(SwitchAutoReloadPin);
-    if (AutoReload == 0) // Si le mode Reload est activé avec le switch Reload
+    // If Reload mode is activated with the Reload switch
+    if (AutoReload == LOW)
     {
-        digitalWrite(LedAutoReloadPin, HIGH); // allume la led Autoreload
+        //Turn on the AutoReload Led
+        digitalWrite(LedAutoReloadPin, HIGH);
 
-        if ((see0 == 0) || (see1 == 0) || (see2 == 0) || (see3 == 0)) // si on sort de l'écran
-        {
-            // Serial.println("Reload !!! Clic Droit");
-            AbsMouse.press(MOUSE_RIGHT);
-        }
-        else
-        {
-            AbsMouse.release(MOUSE_RIGHT);
-        }
+        // If the gun leaves the screen
+        setMouseButton(MOUSE_RIGHT, (see0 == 0) || (see1 == 0) || (see2 == 0) || (see3 == 0));
         delay(10);
     }
     else
     {
-        // Serial.println("Mode Reload désactivé");
-        digitalWrite(LedAutoReloadPin, LOW); // Éteind la led Autoreload
-        AbsMouse.release(MOUSE_RIGHT);
+        // Serial.println("Mode Reload disabled");
+        digitalWrite(LedAutoReloadPin, LOW); // Turn off the AutoReload Led
+        setMouseButton(MOUSE_RIGHT, false);
     }
     delay(10);
 }
 
 // ——————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
 // ###########################
-// # Gestion boutons Hybride #
+// # Hybrid mode buttons #
 // ###########################
-// Valeurs des boutons Souris + Joystick envoyées au HID Device
-void Hybride_Buttons()
+
+// Mouse + Joystick button values sent to HID Device
+void hybridButtons()
 {
+    bool ButtonState_Trigger = !digitalRead(TriggerPin);
+    bool ButtonState_Reload = !digitalRead(ReloadPin);
+    bool ButtonState_Start = !digitalRead(StartPin);
 
-    int ButtonState_Trigger = !digitalRead(0 + pinToButtonMap); // pin 14
-    int ButtonState_Start = !digitalRead(1 + pinToButtonMap);  // pin 15
-    int ButtonState_Reload = !digitalRead(2 + pinToButtonMap); // pin 16
-
-    // Routine pour tirer en rafale (appuie momentané)
-    switch (Automatic)
+    // Routine for burst firing (momentary press)
+    switch (currentAutomaticMode)
     {
-    case 1:
-        if (ButtonState_Trigger != LastButtonState[0])
-        {
-            if (ButtonState_Trigger == HIGH)
+        default:
+        case AUTOMATIC_1_SHOT:
+        case AUTOMATIC_2_SHOT:
+        case AUTOMATIC_3_SHOT:
+        case AUTOMATIC_4_SHOT:
+        case AUTOMATIC_5_SHOT:
+        case AUTOMATIC_6_SHOT:
+            if (ButtonState_Trigger != LastButtonState_Trigger)
             {
-                fire = 1;
+                if (ButtonState_Trigger)
+                {
+                    shouldFire = true;
+                }
+                LastButtonState_Trigger = ButtonState_Trigger;
             }
-            LastButtonState[0] = ButtonState_Trigger;
-        }
-        NBdeTirs = 1;
-        TIRenRafaleHybride();
-        break;
-    case 2:
-        if (ButtonState_Trigger != LastButtonState[0])
-        {
-            if (ButtonState_Trigger == HIGH)
+            shotCount = currentAutomaticMode + 1;
+            hybridShotBurst();
+            break;
+        case AUTOMATIC_MACHINE_GUN:
+            if (ButtonState_Trigger)
             {
-                fire = 1;
+                shouldFire = true;
             }
-            LastButtonState[0] = ButtonState_Trigger;
-        }
-        NBdeTirs = 2;
-        TIRenRafaleHybride();
-        break;
-    case 3:
-        if (ButtonState_Trigger != LastButtonState[0])
-        {
-            if (ButtonState_Trigger == HIGH)
+            shotCount = 1;
+            hybridShotBurst();
+            break;
+        case AUTOMATIC_SHOT_SUSTAINED:
+            // Button pressed and held for certain games (Alien, T2, etc...)
+            if (ButtonState_Trigger)
             {
-                fire = 1;
+                setMouseButton(MOUSE_LEFT, true);
+                setJoystickButton(0, HIGH); // Press the button
+                digitalWrite(LedFirePin, HIGH);
+                fireSolenoid();
             }
-            LastButtonState[0] = ButtonState_Trigger;
-        }
-        NBdeTirs = 3;
-        TIRenRafaleHybride();
-        break;
-    case 4:
-        if (ButtonState_Trigger != LastButtonState[0])
-        {
-            if (ButtonState_Trigger == HIGH)
+            else
             {
-                fire = 1;
+                setMouseButton(MOUSE_LEFT, false);
+                setJoystickButton(0, LOW); // Release the button
+                digitalWrite(LedFirePin, LOW);
             }
-            LastButtonState[0] = ButtonState_Trigger;
-        }
-        NBdeTirs = 4;
-        TIRenRafaleHybride();
-        break;
-    case 5:
-        if (ButtonState_Trigger != LastButtonState[0])
-        {
-            if (ButtonState_Trigger == HIGH)
-            {
-                fire = 1;
-            }
-            LastButtonState[0] = ButtonState_Trigger;
-        }
-        NBdeTirs = 5;
-        TIRenRafaleHybride();
-        break;
-    case 6:
-        if (ButtonState_Trigger != LastButtonState[0])
-        {
-            if (ButtonState_Trigger == HIGH)
-            {
-                fire = 1;
-            }
-            LastButtonState[0] = ButtonState_Trigger;
-        }
-        NBdeTirs = 6;
-        TIRenRafaleHybride();
-        break;
-    case 7: // Autofire MachineGun
-        if (ButtonState_Trigger == HIGH)
-        {
-            fire = 1;
-        }
-        NBdeTirs = 1;
-        TIRenRafaleHybride();
-        break;
-    case 8: // 1 coup avec Tir maintenu (spécial Alien3, Terminator…)
-        if (ButtonState_Trigger == HIGH)
-        {
-            AbsMouse.press(MOUSE_LEFT);
-            setButton(0, HIGH); // Bouton appuyé
-            digitalWrite(LedFirePin, HIGH);
-            ActionneSolenoid();
-        }
-        else
-        {
-            AbsMouse.release(MOUSE_LEFT);
-            setButton(0, LOW); // Bouton relâché
-            digitalWrite(LedFirePin, LOW);
-        }
-        delay(15);
-        break;
-    default:
-        break;
+            delay(15);
+            break;
     }
 
-    if (ButtonState_Start != LastButtonState[1])
-    { // StartPin
-        if (ButtonState_Start == LOW)
-        {
-            AbsMouse.press(MOUSE_MIDDLE);
-            setButton(1, HIGH); // Bouton appuyé
-        }
-        else
-        {
-            AbsMouse.release(MOUSE_MIDDLE);
-            setButton(1, LOW); // Bouton relâché
-        }
+    // Start button
+    if (ButtonState_Start != LastButtonState_Start)
+    {
+        setMouseButton(MOUSE_MIDDLE, ButtonState_Start);
+        setJoystickButton(1, ButtonState_Start);
         delay(15);
-        LastButtonState[1] = ButtonState_Start;
+        LastButtonState_Start = ButtonState_Start;
     }
 
-    if (ButtonState_Reload != LastButtonState[2])
-    { // ReloadPin
-        if (ButtonState_Reload == LOW)
-        {
-            AbsMouse.press(MOUSE_RIGHT);
-            setButton(2, HIGH); // Bouton appuyé
-        }
-        else
-        {
-            AbsMouse.release(MOUSE_RIGHT);
-            setButton(2, LOW); // Bouton relâché
-        }
+    // Reload button
+    if (ButtonState_Reload != LastButtonState_Reload)
+    {
+        setMouseButton(MOUSE_RIGHT, ButtonState_Reload);
+        setJoystickButton(2, ButtonState_Reload);
         delay(15);
-        LastButtonState[2] = ButtonState_Reload;
+        LastButtonState_Reload = ButtonState_Reload;
     }
 
-    /* Mode RELOAD automatique si le curseur sort de l'écran, géré par logiciel */
+    // Automatic reload mode if the cursor leaves the screen, managed by software
     AutoReload = digitalRead(SwitchAutoReloadPin);
-    if (AutoReload == 0) // Si le mode auto Reload est activé avec le switch AutoReload
+    // If Reload mode is activated with the Reload switch
+    if (AutoReload == LOW)
     {
-        digitalWrite(LedAutoReloadPin, HIGH); // Allume la led Autoreload
+        //Turn on the AutoReload Led
+        digitalWrite(LedAutoReloadPin, HIGH);
 
-        if ((see0 == 0) || (see1 == 0) || (see2 == 0) || (see3 == 0)) // si on sort de l'écran
+        // If the gun leaves the screen
+        if ((see0 == 0) || (see1 == 0) || (see2 == 0) || (see3 == 0))
         {
-            // Serial.println("Reload bouton !!!");
-            AbsMouse.press(MOUSE_RIGHT);
-            setButton(2, HIGH); // pin 16
+            //Serial.println("Reload button !!!");
+            setMouseButton(MOUSE_RIGHT, true);
+            setJoystickButton(2, HIGH);
         }
         else
         {
-            AbsMouse.release(MOUSE_RIGHT);
-            setButton(2, LOW); // pin 16
+            setMouseButton(MOUSE_RIGHT, false);
+            setJoystickButton(2, LOW);
         }
         delay(15);
     }
-    else if (LastButtonState[2] == LOW)
+    else
     {
-        // Serial.println("Mode Reload désactivé");
-        digitalWrite(LedAutoReloadPin, LOW); // Éteind la led Autoreload
-        AbsMouse.release(MOUSE_RIGHT);
-        setButton(2, LOW);
+        // Serial.println("Reload mode disabled");
+        digitalWrite(LedAutoReloadPin, LOW); // Turn off the AutoReload Led
+        setMouseButton(MOUSE_RIGHT, false);
+        setJoystickButton(2, LOW);
     }
 }
 
 // ——————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
 // ###############################
-// # Gestion Boutons de Joystick #
+// # Joystick buttons #
 // ###############################
-// Valeurs des boutons du Joystick envoyées au HID Device
-void Joystick_device_Buttons()
+
+// Joystick button values sent to HID Device
+void joystickButtons()
 {
+    bool ButtonState_Trigger = !digitalRead(TriggerPin);
+    bool ButtonState_Reload = !digitalRead(ReloadPin);
+    bool ButtonState_Start = !digitalRead(StartPin);
 
-    //  for (int index = 0; index < 3; index++)
-    //  {
-    //    int currentButtonState = !digitalRead(index + pinToButtonMap);
-    //    if (currentButtonState != LastButtonState[index])
-    //    {
-    //      setButton(index, currentButtonState);
-    //      LastButtonState[index] = currentButtonState;
-    //    }
-    //  }
-
-    int Etat_bouton_Tir = !digitalRead(0 + pinToButtonMap);    // pin 14
-    int Etat_bouton_start = !digitalRead(1 + pinToButtonMap);  // pin 15
-    int Etat_bouton_Reload = !digitalRead(2 + pinToButtonMap); // pin 16
-
-    // Routine pour tirer (appuie maintenu)
-    //  if (Etat_bouton_Tir != LastButtonState[0]) {
-    //    setButton(0, Etat_bouton_Tir);
-    //    LastButtonState[0] = Etat_bouton_Tir;
-    //  }
-
-    // Routine alternative pour tirer (appuie maintenu)
-    //  if (Etat_bouton_Tir != LastButtonState[0]) {
-    //    if (Etat_bouton_Tir == HIGH) {
-    //      setButton(0, HIGH);  // Bouton appuyé
-    //    }
-    //    else {
-    //      setButton(0, LOW);  // Bouton relâché
-    //    }
-    //    LastButtonState[0] = Etat_bouton_Tir;
-    //  }
-
-    // Routine pour tirer en rafale (appuie momentané)
-    switch (Automatic)
+    // Routine for burst firing (momentary press)
+    switch (currentAutomaticMode)
     {
-    case 1: // 1 coup
-        if (Etat_bouton_Tir != LastButtonState[0])
-        {
-            if (Etat_bouton_Tir == HIGH)
+        default:
+        case AUTOMATIC_1_SHOT:
+        case AUTOMATIC_2_SHOT:
+        case AUTOMATIC_3_SHOT:
+        case AUTOMATIC_4_SHOT:
+        case AUTOMATIC_5_SHOT:
+        case AUTOMATIC_6_SHOT:
+            if (ButtonState_Trigger != LastButtonState_Trigger)
             {
-                fire = 1;
+                if (ButtonState_Trigger)
+                {
+                    shouldFire = true;
+                }
+                LastButtonState_Trigger = ButtonState_Trigger;
             }
-            LastButtonState[0] = Etat_bouton_Tir;
-        }
-        NBdeTirs = 1;
-        TIRenRafaleJoyStick();
-        break;
-    case 2: // 2 coups
-        if (Etat_bouton_Tir != LastButtonState[0])
-        {
-            if (Etat_bouton_Tir == HIGH)
+            shotCount = currentAutomaticMode + 1;
+            joystickShotBurst();
+            break;
+        case AUTOMATIC_MACHINE_GUN:
+            if (ButtonState_Trigger)
             {
-                fire = 1;
+                shouldFire = true;
             }
-            LastButtonState[0] = Etat_bouton_Tir;
-        }
-        NBdeTirs = 2;
-        TIRenRafaleJoyStick();
-        break;
-    case 3: // 3 coups
-        if (Etat_bouton_Tir != LastButtonState[0])
-        {
-            if (Etat_bouton_Tir == HIGH)
+            shotCount = 1;
+            joystickShotBurst();
+            break;
+        case AUTOMATIC_SHOT_SUSTAINED:
+            // Button pressed and held for certain games (Alien, T2, etc...)
+            if (ButtonState_Trigger)
             {
-                fire = 1;
+                setJoystickButton(0, HIGH); // Press the button
+                flashLED();
+                fireSolenoid();
             }
-            LastButtonState[0] = Etat_bouton_Tir;
-        }
-        NBdeTirs = 3;
-        TIRenRafaleJoyStick();
-        break;
-    case 4: // 4 coups
-        if (Etat_bouton_Tir != LastButtonState[0])
-        {
-            if (Etat_bouton_Tir == HIGH)
+            else
             {
-                fire = 1;
+                setJoystickButton(0, LOW); // Release the button
+                digitalWrite(LedFirePin, LOW);
             }
-            LastButtonState[0] = Etat_bouton_Tir;
-        }
-        NBdeTirs = 4;
-        TIRenRafaleJoyStick();
-        break;
-    case 5: // 5 coups
-        if (Etat_bouton_Tir != LastButtonState[0])
-        {
-            if (Etat_bouton_Tir == HIGH)
-            {
-                fire = 1;
-            }
-            LastButtonState[0] = Etat_bouton_Tir;
-        }
-        NBdeTirs = 5;
-        TIRenRafaleJoyStick();
-        break;
-    case 6: // 6 coups
-        if (Etat_bouton_Tir != LastButtonState[0])
-        {
-            if (Etat_bouton_Tir == HIGH)
-            {
-                fire = 1;
-            }
-            LastButtonState[0] = Etat_bouton_Tir;
-        }
-        NBdeTirs = 6;
-        TIRenRafaleJoyStick();
-        break;
-    case 7: // Autofire MachineGun
-        if (Etat_bouton_Tir == HIGH)
-        {
-            fire = 1;
-        }
-        NBdeTirs = 1;
-        TIRenRafaleJoyStick();
-        break;
-    case 8: // 1 coup avec Tir maintenu (spécial Alien3, Terminator…)
-        if (Etat_bouton_Tir == HIGH)
-        {
-            setButton(0, HIGH); // Bouton appuyé
-            clignotteLED();
-            ActionneSolenoid();
-        }
-        else
-        {
-            setButton(0, LOW); // Bouton relâché
-            digitalWrite(LedFirePin, LOW);
-        }
+            delay(15);
+            break;
+    }
+
+    // Start button
+    if (ButtonState_Start != LastButtonState_Start)
+    {
+        setJoystickButton(1, ButtonState_Start);
         delay(15);
-        break;
-    default:
-        break;
+        LastButtonState_Start = ButtonState_Start;
     }
 
-    if (Etat_bouton_start != LastButtonState[1])
+    // Reload button
+    if (ButtonState_Reload != LastButtonState_Reload)
     {
-        setButton(1, Etat_bouton_start);
-        LastButtonState[1] = Etat_bouton_start;
+        setJoystickButton(2, ButtonState_Reload);
+        delay(15);
+        LastButtonState_Reload = ButtonState_Reload;
     }
 
-    if (Etat_bouton_Reload != LastButtonState[2])
-    {
-        setButton(2, Etat_bouton_Reload);
-        LastButtonState[2] = Etat_bouton_Reload;
-    }
-
-    /* Mode RELOAD automatique si le curseur sort de l'écran, géré par logiciel */
+    // Automatic reload mode if the cursor leaves the screen, managed by software
     AutoReload = digitalRead(SwitchAutoReloadPin);
-    if (AutoReload == 0) // Si le mode auto Reload est activé avec le switch AutoReload
+    // If Reload mode is activated with the Reload switch
+    if (AutoReload == LOW)
     {
-        digitalWrite(LedAutoReloadPin, HIGH); // Allume la led Autoreload
+        //Turn on the AutoReload Led
+        digitalWrite(LedAutoReloadPin, HIGH);
 
-        if ((see0 == 0) || (see1 == 0) || (see2 == 0) || (see3 == 0)) // si on sort de l'écran
-        {
-            // Serial.println("Reload bouton !!!");
-            setButton(2, HIGH); // pin 16
-        }
-        else
-        {
-            setButton(2, LOW); // pin 16
-        }
+        // If the gun leaves the screen
+        setJoystickButton(2, (see0 == 0) || (see1 == 0) || (see2 == 0) || (see3 == 0));
+        delay(15);
     }
-    else if (LastButtonState[2] == LOW)
+    else
     {
-        // Serial.println("Mode Reload désactivé");
-        digitalWrite(LedAutoReloadPin, LOW); // Éteind la led Autoreload
-        setButton(2, LOW);
+        // Serial.println("Reload mode disabled");
+        digitalWrite(LedAutoReloadPin, LOW); // Turn off the AutoReload Led
+        setJoystickButton(2, LOW);
     }
 }
 
-void setButton(uint8_t button, bool value)
+void setMouseButton(uint8_t button, bool value)
+{
+    if (value)
+    {
+        AbsMouse.press(button);
+    }
+    else
+    {
+        AbsMouse.release(button);
+    }
+}
+
+void setJoystickButton(uint8_t button, bool value)
 {
     if (value)
     {
@@ -1336,11 +1073,11 @@ void setButton(uint8_t button, bool value)
 
 // ——————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
 // ###################################
-// # Gestion Boutons de Calibrations #
+// # Calibration methods #
 // ###################################
 
 // Setup Start Calibration Button
-void go()
+void startCalibration()
 {
     // ButtonState_Calibration = (digitalRead(StartPin) | digitalRead(TriggerPin));
     ButtonState_Calibration = (digitalRead(StartPin) | digitalRead(TriggerPin) | digitalRead(ReloadPin));
@@ -1350,56 +1087,39 @@ void go()
         {
             count--;
         }
-        else
-        { // do nothing
-        }
         delay(50);
     }
     LastButtonState_Calibration = ButtonState_Calibration;
 }
 
-// Procédure de calibration
+// Calibration procedure
 void mouseCount()
 {
     ButtonValid = digitalRead(TriggerPin);
     ButtonPlus = digitalRead(StartPin);
     ButtonMinus = digitalRead(ReloadPin);
 
+    // Validation
     if (ButtonValid != LastButtonValid)
-    { // validation
+    {
         if (ButtonValid == LOW)
         {
             count--;
         }
-        else
-        {
-        }
         delay(10);
     }
 
+    // Tuning Up
     if (ButtonPlus != LastButtonPlus)
-    { // réglage +
-        if (ButtonPlus == LOW)
-        {
-            plus = 1;
-        }
-        else
-        {
-            plus = 0;
-        }
+    {
+        plus = !ButtonPlus;
         delay(10);
     }
 
+    // Tuning down
     if (ButtonMinus != LastButtonMinus)
-    { // réglage -
-        if (ButtonMinus == LOW)
-        {
-            minus = 1;
-        }
-        else
-        {
-            minus = 0;
-        }
+    {
+        plus = !ButtonMinus;
         delay(10);
     }
 
@@ -1409,19 +1129,16 @@ void mouseCount()
 }
 
 // Pause/Re-calibrate button
-void reset()
+void resetCalibration()
 {
-    // ButtonState_Calibration = (digitalRead(StartPin) | digitalRead(TriggerPin));
-    ButtonState_Calibration = (digitalRead(StartPin) | digitalRead(TriggerPin) | digitalRead(ReloadPin));
+    //ButtonState_Calibration = (!digitalRead(StartPin) | !digitalRead(TriggerPin));
+    ButtonState_Calibration = (!digitalRead(StartPin) | !digitalRead(TriggerPin) | !digitalRead(ReloadPin));
     if (ButtonState_Calibration != LastButtonState_Calibration)
     {
-        if (ButtonState_Calibration == LOW)
+        if (ButtonState_Calibration)
         {
             count = 4;
             delay(50);
-        }
-        else
-        { // do nothing
         }
         delay(50);
     }
@@ -1429,19 +1146,16 @@ void reset()
 }
 
 // Unpause button
-void skip()
+void skipCalibration()
 {
-    // ButtonState_Calibration = (digitalRead(StartPin) | digitalRead(TriggerPin));
-    ButtonState_Calibration = (digitalRead(StartPin) | digitalRead(TriggerPin) | digitalRead(ReloadPin));
+    // ButtonState_Calibration = (!digitalRead(StartPin) | !digitalRead(TriggerPin));
+    ButtonState_Calibration = (!digitalRead(StartPin) | !digitalRead(TriggerPin) | !digitalRead(ReloadPin));
     if (ButtonState_Calibration != LastButtonState_Calibration)
     {
-        if (ButtonState_Calibration == LOW)
+        if (ButtonState_Calibration)
         {
             count = 0;
             delay(50);
-        }
-        else
-        { // do nothing
         }
         delay(50);
     }
@@ -1450,14 +1164,15 @@ void skip()
 
 // ——————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
 // ##########################
-// # Gestion Mémoire eeprom #
+// # EEPROM Memory management #
 // ##########################
-// Re-charger les valeurs de calibration depuis la mémoire EEPROM
+
+// Reload calibration values from the EEPROM memory
 void loadSettings()
 {
     if (EEPROM.read(1023) == 'T')
     {
-        // settings have been initialized, read them
+        // Settings have been initialized, read them
         xCenter = EEPROM.read(0) + 256;
         yCenter = EEPROM.read(1) + 256;
         xOffset = EEPROM.read(2);
@@ -1465,7 +1180,7 @@ void loadSettings()
     }
     else
     {
-        // first time run, settings were never set
+        // First time run, settings were never set
         EEPROM.write(0, xCenter - 256);
         EEPROM.write(1, yCenter - 256);
         EEPROM.write(2, xOffset);
@@ -1475,14 +1190,14 @@ void loadSettings()
 }
 
 // Print results for saving calibration
-void PrintResults()
+void printResults()
 {
     Serial.print("CALIBRATION:");
-    Serial.print("     Cam Center x/y: ");
+    Serial.print("\tCam Center x/y: ");
     Serial.print(xCenter);
     Serial.print(", ");
     Serial.print(yCenter);
-    Serial.print("     Offsets x/y: ");
+    Serial.print("\tOffsets x/y: ");
     Serial.print(xOffset);
     Serial.print(", ");
     Serial.println(yOffset);
