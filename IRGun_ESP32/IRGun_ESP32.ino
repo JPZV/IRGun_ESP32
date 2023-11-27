@@ -99,15 +99,14 @@ int count = -2; // Set initial count
 #define StartPin 34                 // Also used for calibration (minus)
 #define ReloadPin 36                // Also used for calibration (plus)
 #define SwitchAutoReloadPin 35      // Auto reload On/Off
-#define SwitchSuspendMousePin 14    // (Active by default if not wired) Disables the Mouse (the HID is present, but the data is no longer sent to the mouse)
-#define SwitchSuspendJoystickPin 12 // (Active by default if not wired) Disables the joystick. Note: Could Fail in ESP32?
+#define ChangeHIDModePin 14         // Changes the HID Mode between Mouse, Joystick and Hibryd
 
 //***************************
 //* Output defines *
 //***************************
 #define LedFirePin 13
-#define LedSuspendMousePin 25
-#define LedSuspendJoystickPin 26
+#define LedMouseModePin 25
+#define LedJoystickModePin 26
 #define LedAutoReloadPin 27
 #define LedRedPin 16
 #define LedGreenPin 17
@@ -156,9 +155,16 @@ enum AutomaticModes
 unsigned short currentAutomaticMode = AUTOMATIC_1_SHOT;
 unsigned int burstCount = 0;
 
+enum HIDModes
+{
+    HID_MODE_MOUSE,
+    HID_MODE_JOYSTICK,
+    HID_MODE_HIBRYD,
+    HID_MODE_MAX
+};
+unsigned short currentHIDMode = HID_MODE_MOUSE;
+
 // Buttons states
-unsigned int SuspendMouse = 0;
-unsigned int SuspendJoystick = 0;
 unsigned int AutoReload = 0;
 unsigned int LastAutoReload = 0;
 int ButtonPlus = 0;
@@ -172,6 +178,7 @@ int LastButtonState_Calibration = 0;
 bool LastButtonState_Trigger = 0;
 bool LastButtonState_Reload = 0;
 bool LastButtonState_Start = 0;
+bool LastButtonState_ChangeHIDMode = 0;
 
 bool plus = 0;
 bool minus = 0;
@@ -211,12 +218,11 @@ void setup()
 
     // Switchs
     pinMode(SwitchAutoReloadPin, INPUT_PULLUP);
-    pinMode(SwitchSuspendMousePin, INPUT_PULLUP);
-    pinMode(SwitchSuspendJoystickPin, INPUT_PULLUP);
+    pinMode(ChangeHIDModePin, INPUT_PULLUP);
 
     // Leds
-    pinMode(LedSuspendMousePin, OUTPUT);
-    pinMode(LedSuspendJoystickPin, OUTPUT);
+    pinMode(LedMouseModePin, OUTPUT);
+    pinMode(LedJoystickModePin, OUTPUT);
     pinMode(LedAutoReloadPin, OUTPUT);
     pinMode(LedFirePin, OUTPUT);
     pinMode(LedRedPin, OUTPUT);
@@ -334,56 +340,21 @@ void loop()
     // Normal use of the gun
     else
     {
+        bool ButtonState_ChangeHIDMode = !digitalRead(ChangeHIDModePin);
 
-        SuspendMouse = digitalRead(SwitchSuspendMousePin);
-        // Enabling mouse movements (if LOW then the mouse is disabled by the Switch)
-        if ((SuspendMouse == HIGH) && (SuspendJoystick == LOW))
+        if (ButtonState_ChangeHIDMode && ButtonState_ChangeHIDMode != LastButtonState_ChangeHIDMode)
         {
-            //Serial.println("Mouse Enabled");
-            digitalWrite(LedSuspendMousePin, HIGH);     // Turn on the Led
-            AbsMouse.move(conMoveXAxis, conMoveYAxis);  // Movements sent to HID
-            mouseButtons();                             // Clicks sent to HID
-                                                        //    Serial.print("conMoveXAxis :");
-                                                        //    Serial.print(conMoveXAxis);
-                                                        //    Serial.print(",  conMoveYAxis :");
-                                                        //    Serial.println(conMoveYAxis);
+            currentHIDMode = (currentHIDMode + 1) % HID_MODE_MAX;
+            ButtonState_ChangeHIDMode = LastButtonState_ChangeHIDMode;
         }
-        // Completely disabling the mouse
-        else
+        else if (ButtonState_ChangeHIDMode != LastButtonState_ChangeHIDMode)
         {
-            //Serial.println("Mouse Disabled");
-            //Serial.println(" ");
-            digitalWrite(LedSuspendMousePin, LOW); // Turn off the Led
+            ButtonState_ChangeHIDMode = LastButtonState_ChangeHIDMode;
         }
 
-        SuspendJoystick = digitalRead(SwitchSuspendJoystickPin);
-        // Enabling joystick movements (if LOW then the joystick is disabled by the Switch)
-        if ((SuspendMouse == LOW) && (SuspendJoystick == HIGH))
-        {
-            //Serial.println("Joystick enabled");
-            digitalWrite(LedSuspendJoystickPin, HIGH);  // Turn on the Led
-            joystickButtons();                  // Buttons sent to HID
-            joystick_device_Stick();                    // Movements sent to HID
-        }
-        // Completely disabling the joystick
-        else
-        {
-            //Serial.println("Joystick disabled");
-            //Serial.println(" ");
-            digitalWrite(LedSuspendJoystickPin, LOW);   // Turn off the Led
-            Joystick.setX(127);                         // centering de axis
-            Joystick.setY(127);
-        }
-
-        // Enabling Hybrid mode (Mouse movement only) and (mouse button + joystick button)
-        if ((SuspendMouse == HIGH) && (SuspendJoystick == HIGH))
-        {
-            //Serial.println("Hybrid mode enabled");
-            digitalWrite(LedSuspendMousePin, HIGH);     // Turn on the Led
-            digitalWrite(LedSuspendJoystickPin, HIGH);  // Turn on the Led
-            AbsMouse.move(conMoveXAxis, conMoveYAxis);  // Movements sent to HID
-            hybridButtons();                           // Buttons sent to HID
-        }
+        handleHIDLeds();
+        handleButtons();
+        handleAxis();
 
         getPosition(); // Retrieving IR camera values
 
@@ -436,7 +407,7 @@ void getPosition()
 // ##################################
 // # Joystick movements  #
 // ##################################
-void joystick_device_Stick()
+void joystickStick()
 {
     int xAxis = map(conMoveXAxis, 0, 1023, 0, 255); // Reverse axis required
     int yAxis = map(conMoveYAxis, 0, 768, 0, 255);
@@ -578,6 +549,30 @@ void ledRGBautomatic()
 // # Opto-mechanical event management #
 // #####################################
 
+// #############################
+// # Handling buttons #
+// #############################
+// Turn on/off the HID mode Leds
+void handleHIDLeds()
+{
+    switch (currentHIDMode)
+    {
+        case HID_MODE_MOUSE:
+            digitalWrite(LedMouseModePin, HIGH);
+            digitalWrite(LedJoystickModePin, LOW);
+            break;
+        case HID_MODE_JOYSTICK:
+            digitalWrite(LedMouseModePin, LOW);
+            digitalWrite(LedJoystickModePin, HIGH);
+            break;
+        default:
+        case HID_MODE_HIBRYD:
+            digitalWrite(LedMouseModePin, HIGH);
+            digitalWrite(LedJoystickModePin, HIGH);
+            break;
+    }
+}
+
 void flashLED()
 {
     unsigned long currentTime = millis();
@@ -648,7 +643,7 @@ void modeAutomatic()
     }
 }
 
-void mouseShotBurst()
+void shotBurst()
 {
     if (shouldFire)
     {
@@ -656,7 +651,20 @@ void mouseShotBurst()
         if (currentTime - lastFireTime >= CadenceTir)
         {
             lastFireTime = currentTime;
-            setMouseButton(MOUSE_LEFT, true);
+            switch (currentHIDMode)
+            {
+                case HID_MODE_MOUSE:
+                    setMouseButton(MOUSE_LEFT, true);
+                    break;
+                case HID_MODE_JOYSTICK:
+                    setJoystickButton(0, true);
+                    break;
+                default:
+                case HID_MODE_HIBRYD:
+                    setMouseButton(MOUSE_LEFT, true);
+                    setJoystickButton(0, true);
+                    break;
+            }
             digitalWrite(LedFirePin, HIGH);
             fireSolenoid();
             burstCount++;
@@ -669,6 +677,7 @@ void mouseShotBurst()
         else
         {
             setMouseButton(MOUSE_LEFT, false);
+            setJoystickButton(0, false);
             digitalWrite(LedFirePin, LOW);
         }
     }
@@ -676,91 +685,22 @@ void mouseShotBurst()
     {
         // If fire differs from 1, turn off the Led and don't fire the gun
         setMouseButton(MOUSE_LEFT, false);
+        setJoystickButton(0, false);
         digitalWrite(LedFirePin, LOW);
     }
     delay(10);
 }
 
-void joystickShotBurst()
-{
-    if (shouldFire)
-    {
-        unsigned long currentTime = millis();
-        if (currentTime - lastFireTime >= CadenceTir)
-        {
-            lastFireTime = currentTime;
-            setJoystickButton(0, HIGH); // Press the button
-            digitalWrite(LedFirePin, HIGH);
-            fireSolenoid();
-            burstCount++;
-            if (burstCount == shotCount)
-            {
-                shouldFire = false;
-                burstCount = 0;
-            }
-        }
-        else
-        {
-            setJoystickButton(0, LOW); // Release the button
-            digitalWrite(LedFirePin, LOW);
-        }
-    }
-    else
-    {
-        // If fire differs from 1, turn off the Led and don't fire the gun
-        setJoystickButton(0, LOW); // Release the button
-        digitalWrite(LedFirePin, LOW);
-    }
-    delay(15);
-}
-
-void hybridShotBurst()
-{
-    if (shouldFire)
-    {
-        unsigned long currentTime = millis();
-        if (currentTime - lastFireTime >= CadenceTir)
-        {
-            lastFireTime = currentTime;
-            setMouseButton(MOUSE_LEFT, true);
-            setJoystickButton(0, HIGH); // Press the button
-            digitalWrite(LedFirePin, HIGH);
-            fireSolenoid();
-            burstCount++;
-            if (burstCount == shotCount)
-            {
-                shouldFire = false;
-                burstCount = 0;
-            }
-        }
-        else
-        {
-            setMouseButton(MOUSE_LEFT, false);
-            setJoystickButton(0, LOW); // Release the button
-            digitalWrite(LedFirePin, LOW);
-        }
-    }
-    else
-    {
-        // If fire differs from 1, turn off the Led and don't fire the gun
-        setMouseButton(MOUSE_LEFT, false);
-        setJoystickButton(0, LOW); // Release the button
-        digitalWrite(LedFirePin, LOW);
-    }
-    delay(15);
-}
-
 // ——————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
 // #############################
-// # Mouse buttons #
+// # Handling buttons #
 // #############################
-
-// Mouse values sent to HID Device
-void mouseButtons()
+// Check the buttons and send it to HID Device
+void handleButtons()
 {
-    bool ButtonState_Trigger = !digitalRead(TriggerPin);
-    bool ButtonState_Reload = !digitalRead(ReloadPin);
-    bool ButtonState_Start = !digitalRead(StartPin);
+    bool ButtonState_Trigger    = !digitalRead(TriggerPin);
+    bool ButtonState_Reload     = !digitalRead(ReloadPin);
+    bool ButtonState_Start      = !digitalRead(StartPin);
 
     switch (currentAutomaticMode)
     {
@@ -780,7 +720,7 @@ void mouseButtons()
                 LastButtonState_Trigger = ButtonState_Trigger;
             }
             shotCount = currentAutomaticMode + 1;
-            mouseShotBurst();
+            shotBurst();
             break;
         case AUTOMATIC_MACHINE_GUN:
             if (ButtonState_Trigger)
@@ -788,21 +728,36 @@ void mouseButtons()
                 shouldFire = true;
             }
             shotCount = 1;
-            mouseShotBurst();
+            shotBurst();
             break;
         case AUTOMATIC_SHOT_SUSTAINED:
             // Button pressed and held for certain games (Alien, T2, etc...)
             if (ButtonState_Trigger)
             {
-                setMouseButton(MOUSE_LEFT, true);
+                switch (currentHIDMode)
+                {
+                    case HID_MODE_MOUSE:
+                        setMouseButton(MOUSE_LEFT, true);
+                        break;
+                    case HID_MODE_JOYSTICK:
+                        setJoystickButton(0, true);
+                        break;
+                    default:
+                    case HID_MODE_HIBRYD:
+                        setMouseButton(MOUSE_LEFT, true);
+                        setJoystickButton(0, true);
+                        break;
+                }
                 flashLED();
                 fireSolenoid();
             }
             else
             {
-                setMouseButton(MOUSE_LEFT, false); // Button release
+                setMouseButton(MOUSE_LEFT, false);
+                setJoystickButton(0, false);
                 digitalWrite(LedFirePin, LOW);
             }
+
             delay(10);
             break;
     }
@@ -810,7 +765,29 @@ void mouseButtons()
     // Reload button
     if (ButtonState_Reload != LastButtonState_Reload)
     {
-        setMouseButton(MOUSE_RIGHT, ButtonState_Reload);
+        if (ButtonState_Reload)
+        {
+            switch (currentHIDMode)
+            {
+                case HID_MODE_MOUSE:
+                    setMouseButton(MOUSE_RIGHT, true);
+                    break;
+                case HID_MODE_JOYSTICK:
+                    setJoystickButton(1, true);
+                    break;
+                default:
+                case HID_MODE_HIBRYD:
+                    setMouseButton(MOUSE_RIGHT, true);
+                    setJoystickButton(1, true);
+                    break;
+            }
+        }
+        else
+        {
+            setMouseButton(MOUSE_RIGHT, false);
+            setJoystickButton(1, false);
+        }
+
         delay(10);
         LastButtonState_Reload = ButtonState_Reload;
     }
@@ -818,7 +795,29 @@ void mouseButtons()
     // Start button
     if (ButtonState_Start != LastButtonState_Start)
     {
-        setMouseButton(MOUSE_MIDDLE, ButtonState_Start);
+        if (ButtonState_Start)
+        {
+            switch (currentHIDMode)
+            {
+                case HID_MODE_MOUSE:
+                    setMouseButton(MOUSE_MIDDLE, true);
+                    break;
+                case HID_MODE_JOYSTICK:
+                    setJoystickButton(2, true);
+                    break;
+                default:
+                case HID_MODE_HIBRYD:
+                    setMouseButton(MOUSE_MIDDLE, true);
+                    setJoystickButton(2, true);
+                    break;
+            }
+        }
+        else
+        {
+            setMouseButton(MOUSE_MIDDLE, false);
+            setJoystickButton(2, false);
+        }
+
         delay(10);
         LastButtonState_Start = ButtonState_Start;
     }
@@ -832,7 +831,29 @@ void mouseButtons()
         digitalWrite(LedAutoReloadPin, HIGH);
 
         // If the gun leaves the screen
-        setMouseButton(MOUSE_RIGHT, (see0 == 0) || (see1 == 0) || (see2 == 0) || (see3 == 0));
+        if (see0 == 0 || see1 == 0 || see2 == 0 || see3 == 0)
+        {
+            switch (currentHIDMode)
+            {
+                case HID_MODE_MOUSE:
+                    setMouseButton(MOUSE_RIGHT, true);
+                    break;
+                case HID_MODE_JOYSTICK:
+                    setJoystickButton(1, true);
+                    break;
+                default:
+                case HID_MODE_HIBRYD:
+                    setMouseButton(MOUSE_RIGHT, true);
+                    setJoystickButton(1, true);
+                    break;
+            }
+        }
+        else
+        {
+            setMouseButton(MOUSE_RIGHT, false);
+            setJoystickButton(1, false);
+        }
+        
         delay(10);
     }
     else
@@ -840,211 +861,9 @@ void mouseButtons()
         // Serial.println("Mode Reload disabled");
         digitalWrite(LedAutoReloadPin, LOW); // Turn off the AutoReload Led
         setMouseButton(MOUSE_RIGHT, false);
+        setJoystickButton(1, false);
     }
     delay(10);
-}
-
-// ——————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
-// ###########################
-// # Hybrid mode buttons #
-// ###########################
-
-// Mouse + Joystick button values sent to HID Device
-void hybridButtons()
-{
-    bool ButtonState_Trigger = !digitalRead(TriggerPin);
-    bool ButtonState_Reload = !digitalRead(ReloadPin);
-    bool ButtonState_Start = !digitalRead(StartPin);
-
-    // Routine for burst firing (momentary press)
-    switch (currentAutomaticMode)
-    {
-        default:
-        case AUTOMATIC_1_SHOT:
-        case AUTOMATIC_2_SHOT:
-        case AUTOMATIC_3_SHOT:
-        case AUTOMATIC_4_SHOT:
-        case AUTOMATIC_5_SHOT:
-        case AUTOMATIC_6_SHOT:
-            if (ButtonState_Trigger != LastButtonState_Trigger)
-            {
-                if (ButtonState_Trigger)
-                {
-                    shouldFire = true;
-                }
-                LastButtonState_Trigger = ButtonState_Trigger;
-            }
-            shotCount = currentAutomaticMode + 1;
-            hybridShotBurst();
-            break;
-        case AUTOMATIC_MACHINE_GUN:
-            if (ButtonState_Trigger)
-            {
-                shouldFire = true;
-            }
-            shotCount = 1;
-            hybridShotBurst();
-            break;
-        case AUTOMATIC_SHOT_SUSTAINED:
-            // Button pressed and held for certain games (Alien, T2, etc...)
-            if (ButtonState_Trigger)
-            {
-                setMouseButton(MOUSE_LEFT, true);
-                setJoystickButton(0, HIGH); // Press the button
-                digitalWrite(LedFirePin, HIGH);
-                fireSolenoid();
-            }
-            else
-            {
-                setMouseButton(MOUSE_LEFT, false);
-                setJoystickButton(0, LOW); // Release the button
-                digitalWrite(LedFirePin, LOW);
-            }
-            delay(15);
-            break;
-    }
-
-    // Start button
-    if (ButtonState_Start != LastButtonState_Start)
-    {
-        setMouseButton(MOUSE_MIDDLE, ButtonState_Start);
-        setJoystickButton(1, ButtonState_Start);
-        delay(15);
-        LastButtonState_Start = ButtonState_Start;
-    }
-
-    // Reload button
-    if (ButtonState_Reload != LastButtonState_Reload)
-    {
-        setMouseButton(MOUSE_RIGHT, ButtonState_Reload);
-        setJoystickButton(2, ButtonState_Reload);
-        delay(15);
-        LastButtonState_Reload = ButtonState_Reload;
-    }
-
-    // Automatic reload mode if the cursor leaves the screen, managed by software
-    AutoReload = digitalRead(SwitchAutoReloadPin);
-    // If Reload mode is activated with the Reload switch
-    if (AutoReload == LOW)
-    {
-        //Turn on the AutoReload Led
-        digitalWrite(LedAutoReloadPin, HIGH);
-
-        // If the gun leaves the screen
-        if ((see0 == 0) || (see1 == 0) || (see2 == 0) || (see3 == 0))
-        {
-            //Serial.println("Reload button !!!");
-            setMouseButton(MOUSE_RIGHT, true);
-            setJoystickButton(2, HIGH);
-        }
-        else
-        {
-            setMouseButton(MOUSE_RIGHT, false);
-            setJoystickButton(2, LOW);
-        }
-        delay(15);
-    }
-    else
-    {
-        // Serial.println("Reload mode disabled");
-        digitalWrite(LedAutoReloadPin, LOW); // Turn off the AutoReload Led
-        setMouseButton(MOUSE_RIGHT, false);
-        setJoystickButton(2, LOW);
-    }
-}
-
-// ——————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
-// ###############################
-// # Joystick buttons #
-// ###############################
-
-// Joystick button values sent to HID Device
-void joystickButtons()
-{
-    bool ButtonState_Trigger = !digitalRead(TriggerPin);
-    bool ButtonState_Reload = !digitalRead(ReloadPin);
-    bool ButtonState_Start = !digitalRead(StartPin);
-
-    // Routine for burst firing (momentary press)
-    switch (currentAutomaticMode)
-    {
-        default:
-        case AUTOMATIC_1_SHOT:
-        case AUTOMATIC_2_SHOT:
-        case AUTOMATIC_3_SHOT:
-        case AUTOMATIC_4_SHOT:
-        case AUTOMATIC_5_SHOT:
-        case AUTOMATIC_6_SHOT:
-            if (ButtonState_Trigger != LastButtonState_Trigger)
-            {
-                if (ButtonState_Trigger)
-                {
-                    shouldFire = true;
-                }
-                LastButtonState_Trigger = ButtonState_Trigger;
-            }
-            shotCount = currentAutomaticMode + 1;
-            joystickShotBurst();
-            break;
-        case AUTOMATIC_MACHINE_GUN:
-            if (ButtonState_Trigger)
-            {
-                shouldFire = true;
-            }
-            shotCount = 1;
-            joystickShotBurst();
-            break;
-        case AUTOMATIC_SHOT_SUSTAINED:
-            // Button pressed and held for certain games (Alien, T2, etc...)
-            if (ButtonState_Trigger)
-            {
-                setJoystickButton(0, HIGH); // Press the button
-                flashLED();
-                fireSolenoid();
-            }
-            else
-            {
-                setJoystickButton(0, LOW); // Release the button
-                digitalWrite(LedFirePin, LOW);
-            }
-            delay(15);
-            break;
-    }
-
-    // Start button
-    if (ButtonState_Start != LastButtonState_Start)
-    {
-        setJoystickButton(1, ButtonState_Start);
-        delay(15);
-        LastButtonState_Start = ButtonState_Start;
-    }
-
-    // Reload button
-    if (ButtonState_Reload != LastButtonState_Reload)
-    {
-        setJoystickButton(2, ButtonState_Reload);
-        delay(15);
-        LastButtonState_Reload = ButtonState_Reload;
-    }
-
-    // Automatic reload mode if the cursor leaves the screen, managed by software
-    AutoReload = digitalRead(SwitchAutoReloadPin);
-    // If Reload mode is activated with the Reload switch
-    if (AutoReload == LOW)
-    {
-        //Turn on the AutoReload Led
-        digitalWrite(LedAutoReloadPin, HIGH);
-
-        // If the gun leaves the screen
-        setJoystickButton(2, (see0 == 0) || (see1 == 0) || (see2 == 0) || (see3 == 0));
-        delay(15);
-    }
-    else
-    {
-        // Serial.println("Reload mode disabled");
-        digitalWrite(LedAutoReloadPin, LOW); // Turn off the AutoReload Led
-        setJoystickButton(2, LOW);
-    }
 }
 
 void setMouseButton(uint8_t button, bool value)
@@ -1068,6 +887,29 @@ void setJoystickButton(uint8_t button, bool value)
     else
     {
         Joystick.release(button);
+    }
+}
+
+// ——————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// #############################
+// # Handling axis/movements #
+// #############################
+// Check the movement and send it to HID Device
+void handleAxis()
+{
+    switch (currentHIDMode)
+    {
+        default:
+        case HID_MODE_MOUSE:
+        case HID_MODE_HIBRYD:
+            AbsMouse.move(conMoveXAxis, conMoveYAxis);
+            //Center the Joystick
+            Joystick.setX(127);
+            Joystick.setY(127);
+            break;
+        case HID_MODE_JOYSTICK:
+            joystickStick();
+            break;
     }
 }
 
