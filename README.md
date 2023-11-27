@@ -21,9 +21,11 @@ As obvious it is, the pinout has changed between the Arduino version and the ESP
 |Trigger|14|GPIO39|
 |Start|15|GPIO34|
 |Reload|16|GPIO36|
-|Auto Reload Switch|4|GPIO35|
-|Disable Mouse Switch|7|GPIO14|
-|Disable Joystick Switch|8|GPIO12|
+|Auto Reload Switch|4|N/A|
+|Disable Mouse Switch|7|N/A|
+|Disable Joystick Switch|8|N/A|
+|Toggle Auto Reload|N/A|GPIO35|
+|Change HID Mode|N/A|GPIO14|
 |Fire Led|A0|GPIO13|
 |Disabled Mouse Led|A1|GPIO25|
 |Disabled Joystick Led|A2|GPIO26|

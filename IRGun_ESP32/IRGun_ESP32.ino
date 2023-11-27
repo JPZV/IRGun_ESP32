@@ -75,7 +75,6 @@ BleGamepadConfiguration JoystickConfig;
 //******************************
 //* Variables for IRCamera *
 //******************************
-int condition = 1;
 int finalX; // Values after tilt correction
 int finalY;
 int see0; // IR LED N°1 seen by the camera. (otherwise = 0)
@@ -98,7 +97,7 @@ int count = -2; // Set initial count
 #define TriggerPin 39               // Label Pin to Joystick buttons
 #define StartPin 34                 // Also used for calibration (minus)
 #define ReloadPin 36                // Also used for calibration (plus)
-#define SwitchAutoReloadPin 35      // Auto reload On/Off
+#define ToggleAutoReloadPin 35      // Auto reload On/Off
 #define ChangeHIDModePin 14         // Changes the HID Mode between Mouse, Joystick and Hibryd
 
 //***************************
@@ -165,20 +164,20 @@ enum HIDModes
 unsigned short currentHIDMode = HID_MODE_MOUSE;
 
 // Buttons states
-bool IsAutoReloadEnabled = 0;
-int ButtonPlus = 0;
-int LastButtonPlus = 0;
-int ButtonMinus = 0;
-int LastButtonMinus = 0;
-int ButtonValid = 0;
-int LastButtonValid = 0;
-int ButtonState_Calibration = 0;
-int LastButtonState_Calibration = 0;
-bool LastButtonState_Trigger = 0;
-bool LastButtonState_Reload = 0;
-bool LastButtonState_Start = 0;
-bool LastButtonState_ChangeHIDMode = 0;
-bool LastButtonState_AutoReload = 0;
+bool IsAutoReloadEnabled = false;
+bool ButtonPlus = false;
+bool LastButtonPlus = false;
+bool ButtonMinus = false;
+bool LastButtonMinus = false;
+bool ButtonValid = false;
+bool LastButtonValid = false;
+bool ButtonState_Calibration = false;
+bool LastButtonState_Calibration = false;
+bool LastButtonState_Trigger = false;
+bool LastButtonState_Reload = false;
+bool LastButtonState_Start = false;
+bool LastButtonState_ChangeHIDMode = false;
+bool LastButtonState_AutoReload = false;
 
 bool plus = 0;
 bool minus = 0;
@@ -217,7 +216,7 @@ void setup()
     loadSettings();
 
     // Switchs
-    pinMode(SwitchAutoReloadPin, INPUT_PULLUP);
+    pinMode(ToggleAutoReloadPin, INPUT_PULLUP);
     pinMode(ChangeHIDModePin, INPUT_PULLUP);
 
     // Leds
@@ -352,7 +351,7 @@ void loop()
             ButtonState_ChangeHIDMode = LastButtonState_ChangeHIDMode;
         }
 
-        bool ButtonState_AutoReload = !digitalRead(SwitchAutoReloadPin);
+        bool ButtonState_AutoReload = !digitalRead(ToggleAutoReloadPin);
         if (ButtonState_AutoReload && ButtonState_AutoReload != LastButtonState_AutoReload)
         {
             IsAutoReloadEnabled = !IsAutoReloadEnabled;
