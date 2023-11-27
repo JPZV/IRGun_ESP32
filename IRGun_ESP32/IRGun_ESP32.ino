@@ -344,6 +344,7 @@ void loop()
         if (ButtonState_ChangeHIDMode && ButtonState_ChangeHIDMode != LastButtonState_ChangeHIDMode)
         {
             currentHIDMode = (currentHIDMode + 1) % HID_MODE_MAX;
+            EEPROM.write(4, currentHIDMode);
             ButtonState_ChangeHIDMode = LastButtonState_ChangeHIDMode;
         }
         else if (ButtonState_ChangeHIDMode != LastButtonState_ChangeHIDMode)
@@ -355,6 +356,7 @@ void loop()
         if (ButtonState_AutoReload && ButtonState_AutoReload != LastButtonState_AutoReload)
         {
             IsAutoReloadEnabled = !IsAutoReloadEnabled;
+            EEPROM.write(5, IsAutoReloadEnabled);
             ButtonState_AutoReload = LastButtonState_AutoReload;
         }
         else if (ButtonState_AutoReload != LastButtonState_AutoReload)
@@ -646,6 +648,7 @@ void modeAutomatic()
             {
                 lastAutoReloadTime = currentTime;
                 currentAutomaticMode = (currentAutomaticMode + 1) % AUTOMATIC_MAX;
+                EEPROM.write(6, currentAutomaticMode);
             }
         }
     }
@@ -1025,6 +1028,9 @@ void loadSettings()
         yCenter = EEPROM.read(1) + 256;
         xOffset = EEPROM.read(2);
         yOffset = EEPROM.read(3);
+        currentHIDMode = EEPROM.read(4) % HID_MODE_MAX;
+        IsAutoReloadEnabled = EEPROM.read(5) == 1;
+        currentAutomaticMode = EEPROM.read(6) % AUTOMATIC_MAX;
     }
     else
     {
@@ -1033,6 +1039,9 @@ void loadSettings()
         EEPROM.write(1, yCenter - 256);
         EEPROM.write(2, xOffset);
         EEPROM.write(3, yOffset);
+        EEPROM.write(4, HID_MODE_MOUSE);
+        EEPROM.write(5, 0);
+        EEPROM.write(6, AUTOMATIC_1_SHOT);
         EEPROM.write(1023, 'T');
     }
 }
