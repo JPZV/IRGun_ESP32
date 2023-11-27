@@ -165,8 +165,7 @@ enum HIDModes
 unsigned short currentHIDMode = HID_MODE_MOUSE;
 
 // Buttons states
-unsigned int AutoReload = 0;
-unsigned int LastAutoReload = 0;
+bool IsAutoReloadEnabled = 0;
 int ButtonPlus = 0;
 int LastButtonPlus = 0;
 int ButtonMinus = 0;
@@ -179,6 +178,7 @@ bool LastButtonState_Trigger = 0;
 bool LastButtonState_Reload = 0;
 bool LastButtonState_Start = 0;
 bool LastButtonState_ChangeHIDMode = 0;
+bool LastButtonState_AutoReload = 0;
 
 bool plus = 0;
 bool minus = 0;
@@ -341,7 +341,6 @@ void loop()
     else
     {
         bool ButtonState_ChangeHIDMode = !digitalRead(ChangeHIDModePin);
-
         if (ButtonState_ChangeHIDMode && ButtonState_ChangeHIDMode != LastButtonState_ChangeHIDMode)
         {
             currentHIDMode = (currentHIDMode + 1) % HID_MODE_MAX;
@@ -350,6 +349,17 @@ void loop()
         else if (ButtonState_ChangeHIDMode != LastButtonState_ChangeHIDMode)
         {
             ButtonState_ChangeHIDMode = LastButtonState_ChangeHIDMode;
+        }
+
+        bool ButtonState_AutoReload = !digitalRead(SwitchAutoReloadPin);
+        if (ButtonState_AutoReload && ButtonState_AutoReload != LastButtonState_AutoReload)
+        {
+            IsAutoReloadEnabled = !IsAutoReloadEnabled;
+            ButtonState_AutoReload = LastButtonState_AutoReload;
+        }
+        else if (ButtonState_AutoReload != LastButtonState_AutoReload)
+        {
+            ButtonState_AutoReload = LastButtonState_AutoReload;
         }
 
         handleHIDLeds();
@@ -625,13 +635,11 @@ void fireSolenoid()
 //- 1 shot sustained
 void modeAutomatic()
 { 
-    int ButtonState_Reload = digitalRead(ReloadPin);
-    AutoReload = digitalRead(SwitchAutoReloadPin);
-    //If Reload mode is activated with the Reload switch
-    if (AutoReload == LOW)
+    //If Reload mode is activated
+    if (IsAutoReloadEnabled)
     {
         ledRGBautomatic();
-        if (ButtonState_Reload == LOW)
+        if (digitalRead(ReloadPin) == LOW)
         {
             unsigned long currentTime = millis();
             if (currentTime - lastAutoReloadTime >= 300)
@@ -822,10 +830,8 @@ void handleButtons()
         LastButtonState_Start = ButtonState_Start;
     }
 
-    // Automatic reload mode if the cursor leaves the screen, managed by software
-    AutoReload = digitalRead(SwitchAutoReloadPin);
-    // If Reload mode is activated with the Reload switch
-    if (AutoReload == LOW)
+    // Automatic reload mode if the cursor leaves the screen, managed by software only if Reload mode is activated
+    if (IsAutoReloadEnabled)
     {
         //Turn on the AutoReload Led
         digitalWrite(LedAutoReloadPin, HIGH);
